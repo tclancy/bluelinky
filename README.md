@@ -15,7 +15,7 @@ below the thresholds. Back-ends for console logging, Twilio SMS and a cheapo
 based on sets of environment variables defined in `.env.example`. There's also
 a Dockerfile for spinning up an image for running a cron job. If anyone ever
 finds this and wants help, I am happy to expand on this limited explanation.
-Otherwise, see [[WHATS_FUEL.md]] for more details.
+Otherwise, see [WHATS_FUEL.md] for more details.
 
 ## Install
 ```sh
