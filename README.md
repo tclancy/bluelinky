@@ -7,7 +7,7 @@ An unofficial nodejs API wrapper for Hyundai BlueLink
 
 ## This Fork
 
-THis fork contains a bit of vibe-coding that may prove useful to others. It
+This fork contains a bit of vibe-coding that may prove useful to others. It
 includes a couple of files to support `monitor-fuel.js`, which checks the car
 for two different low fuel thresholds and sends an alert one time when it goes
 below the thresholds. Back-ends for console logging, Twilio SMS and a cheapo
