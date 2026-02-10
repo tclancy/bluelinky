@@ -12,7 +12,9 @@ includes a couple of files to support `monitor-fuel.js`, which checks the car
 for two different low fuel thresholds and sends an alert one time when it goes
 below the thresholds. Back-ends for console logging, Twilio SMS and a cheapo
 "email my phone number at T-Mobile for SMS" backends are included and work
-based on sets of environment variables defined in `.env.example`.
+based on sets of environment variables defined in `.env.example`. There's also
+a Dockerfile for spinning up an image for running a cron job. If anyone ever
+finds this and wants help, I am happy to expand on this limited explanation.
 
 ## Install
 ```sh
