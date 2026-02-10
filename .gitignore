@@ -1,4 +1,5 @@
 .env
+.envrc
 node_modules/
 .DS_Store
 .rpt2_cache
@@ -8,8 +9,5 @@ config*.json
 .vscode/
 coverage/
 CLAUDE.md
-WHATS_FUEL.md
-get-fuel-level.ts
-monitor-fuel.ts
-alert-backends.ts
 .fuel-alert-state.json
+.claude
