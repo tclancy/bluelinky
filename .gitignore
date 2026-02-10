@@ -7,3 +7,9 @@ config*.json
 .vs/
 .vscode/
 coverage/
+CLAUDE.md
+WHATS_FUEL.md
+get-fuel-level.ts
+monitor-fuel.ts
+alert-backends.ts
+.fuel-alert-state.json

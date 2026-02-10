@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  fuel-monitor:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: bluelinky-fuel-monitor
+    restart: unless-stopped
+
+    # Mount .env file from parent directory
+    volumes:
+      - ../.env:/app/.env:ro
+      - fuel-state:/app
+
+    # Keep container running
+    stdin_open: true
+    tty: true
+
+    environment:
+      - TZ=UTC
+
+    # Optional: Healthcheck to ensure container is working
+    healthcheck:
+      test: ["CMD", "test", "-f", "/var/log/fuel-monitor/cron.log"]
+      interval: 5m
+      timeout: 10s
+      retries: 3
+
+volumes:
+  # Persist the state file across container restarts
+  fuel-state:
