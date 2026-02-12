@@ -26,7 +26,7 @@ fi
 echo "✓ Environment file found"
 
 # Validate required environment variables
-set -a; source /app/.env; set +a
+set -a; . /app/.env; set +a
 
 if [ -z "$BLUELINK_USERNAME" ] || [ -z "$BLUELINK_PASSWORD" ] || [ -z "$BLUELINK_PIN" ]; then
     echo "ERROR: Missing required environment variables in .env"

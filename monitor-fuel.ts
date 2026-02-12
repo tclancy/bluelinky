@@ -25,6 +25,8 @@ const THRESHOLD_LOW = 50;
 const THRESHOLD_CRITICAL = 15;
 
 // Create alert backend (console for dev, can be switched to SMS via env var)
+console.log('DEBUG: process.env.ALERT_BACKEND =', process.env.ALERT_BACKEND);
+console.log('DEBUG: process.env.AWS_SNS_TOPIC_ARN =', process.env.AWS_SNS_TOPIC_ARN);
 const alertBackend: AlertBackend = createAlertBackend();
 
 // Test mode - force an alert for testing
