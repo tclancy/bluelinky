@@ -2,7 +2,7 @@
 # Runs every hour at the top of the hour
 # Logs to /var/log/fuel-monitor/cron.log
 
-# Load environment variables from .env and run monitor-fuel
-0 * * * * cd /app && set -a && source .env && set +a && npx tsx monitor-fuel.ts >> /var/log/fuel-monitor/cron.log 2>&1
+# Run monitor-fuel (environment loaded from /etc/environment)
+0 * * * * cd /app && npx tsx monitor-fuel.ts >> /var/log/fuel-monitor/cron.log 2>&1
 
 # Keep a newline at the end for cron to work properly

@@ -25,7 +25,7 @@ fi
 
 echo "✓ Environment file found"
 
-# Validate required environment variables
+# Load and export environment variables
 set -a; . /app/.env; set +a
 
 if [ -z "$BLUELINK_USERNAME" ] || [ -z "$BLUELINK_PASSWORD" ] || [ -z "$BLUELINK_PIN" ]; then
@@ -35,6 +35,10 @@ if [ -z "$BLUELINK_USERNAME" ] || [ -z "$BLUELINK_PASSWORD" ] || [ -z "$BLUELINK
 fi
 
 echo "✓ Required environment variables validated"
+
+# Export all .env vars to /etc/environment so cron can read them
+grep -v '^#' /app/.env | grep -v '^$' >> /etc/environment
+echo "✓ Environment variables exported for cron"
 
 # Run an initial check to verify everything works
 echo ""
