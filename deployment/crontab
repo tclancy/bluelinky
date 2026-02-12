@@ -3,6 +3,6 @@
 # Logs to /var/log/fuel-monitor/cron.log
 
 # Load environment variables from .env and run monitor-fuel
-0 * * * * cd /app && export $(grep -v '^#' .env | xargs) && /usr/local/bin/node /usr/local/bin/tsx monitor-fuel.ts >> /var/log/fuel-monitor/cron.log 2>&1
+0 * * * * cd /app && export $(grep -v '^#' .env | xargs) && npx tsx monitor-fuel.ts >> /var/log/fuel-monitor/cron.log 2>&1
 
 # Keep a newline at the end for cron to work properly

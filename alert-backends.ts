@@ -5,8 +5,8 @@
  * and SMS messaging (production) without changing core logic.
  */
 
-import twilio from 'twilio';
 import nodemailer from 'nodemailer';
+import { SNSClient, PublishCommand } from '@aws-sdk/client-sns';
 
 export interface AlertMessage {
   severity: 'low' | 'critical';
@@ -48,113 +48,6 @@ export class ConsoleAlertBackend implements AlertBackend {
 
     console.log('─'.repeat(50));
     console.log('(Using Console backend - will be SMS in production)\n');
-  }
-}
-
-/**
- * Twilio Trial SMS Backend - Sends alerts via SMS using trial account
- * Only works with verified phone numbers in Twilio console
- */
-export class TwilioTrialSMSAlertBackend implements AlertBackend {
-  private toPhoneNumbers: string[];
-  private fromPhoneNumber: string;
-  private accountSid: string;
-  private authToken: string;
-
-  constructor(toPhoneNumbers: string[], fromPhoneNumber: string, accountSid: string, authToken: string) {
-    this.toPhoneNumbers = toPhoneNumbers;
-    this.fromPhoneNumber = fromPhoneNumber;
-    this.accountSid = accountSid;
-    this.authToken = authToken;
-  }
-
-  getName(): string {
-    return `Twilio Trial SMS (${this.toPhoneNumbers.length} verified recipient${this.toPhoneNumbers.length > 1 ? 's' : ''})`;
-  }
-
-  async sendAlert(message: AlertMessage): Promise<void> {
-    const client = twilio(this.accountSid, this.authToken);
-    const icon = message.severity === 'critical' ? '🚨' : '⚠️';
-    const title = message.severity === 'critical' ? 'CRITICAL FUEL ALERT' : 'Low Fuel Warning';
-    const body = `${icon} ${title}\n` +
-                 `Vehicle: ${message.vehicleName}\n` +
-                 `Range: ${message.range} miles remaining\n` +
-                 (message.severity === 'critical' ? 'Get gas immediately!' : 'Time to refuel soon.');
-
-    console.log(`📱 Sending trial SMS to ${this.toPhoneNumbers.length} recipient(s)...`);
-    console.log(`   (Recipients must be verified in Twilio console)`);
-
-    // Send to all phone numbers
-    const promises = this.toPhoneNumbers.map(async (toNumber) => {
-      try {
-        const result = await client.messages.create({
-          from: this.fromPhoneNumber,
-          to: toNumber,
-          body
-        });
-        console.log(`   ✅ Sent to ${toNumber} (SID: ${result.sid})`);
-        return result;
-      } catch (error) {
-        console.error(`   ❌ Failed to send to ${toNumber}:`, error);
-        throw error;
-      }
-    });
-
-    await Promise.all(promises);
-    console.log(`\n✅ All trial SMS messages sent successfully!\n`);
-  }
-}
-
-/**
- * Twilio Paid SMS Backend - Sends alerts via SMS with paid account (10DLC registered)
- * Requires business registration and campaign setup
- */
-export class TwilioSMSAlertBackend implements AlertBackend {
-  private toPhoneNumbers: string[];
-  private fromPhoneNumber: string;
-  private accountSid: string;
-  private authToken: string;
-
-  constructor(toPhoneNumbers: string[], fromPhoneNumber: string, accountSid: string, authToken: string) {
-    this.toPhoneNumbers = toPhoneNumbers;
-    this.fromPhoneNumber = fromPhoneNumber;
-    this.accountSid = accountSid;
-    this.authToken = authToken;
-  }
-
-  getName(): string {
-    return `Twilio Paid SMS (${this.toPhoneNumbers.length} recipient${this.toPhoneNumbers.length > 1 ? 's' : ''})`;
-  }
-
-  async sendAlert(message: AlertMessage): Promise<void> {
-    const client = twilio(this.accountSid, this.authToken);
-    const icon = message.severity === 'critical' ? '🚨' : '⚠️';
-    const title = message.severity === 'critical' ? 'CRITICAL FUEL ALERT' : 'Low Fuel Warning';
-    const body = `${icon} ${title}\n` +
-                 `Vehicle: ${message.vehicleName}\n` +
-                 `Range: ${message.range} miles remaining\n` +
-                 (message.severity === 'critical' ? 'Get gas immediately!' : 'Time to refuel soon.');
-
-    console.log(`📱 Sending SMS to ${this.toPhoneNumbers.length} recipient(s)...`);
-
-    // Send to all phone numbers
-    const promises = this.toPhoneNumbers.map(async (toNumber) => {
-      try {
-        const result = await client.messages.create({
-          from: this.fromPhoneNumber,
-          to: toNumber,
-          body
-        });
-        console.log(`   ✅ Sent to ${toNumber} (SID: ${result.sid})`);
-        return result;
-      } catch (error) {
-        console.error(`   ❌ Failed to send to ${toNumber}:`, error);
-        throw error;
-      }
-    });
-
-    await Promise.all(promises);
-    console.log(`\n✅ All SMS messages sent successfully!\n`);
   }
 }
 
@@ -241,60 +134,74 @@ export class TmobileEmailAlertBackend implements AlertBackend {
 }
 
 /**
+ * AWS SNS Backend - Sends alerts via AWS SNS (no phone number needed!)
+ * Most cost-effective option: ~$0.006 per SMS, no monthly fees
+ * Requires AWS credentials and region configuration
+ */
+export class AwsSnsAlertBackend implements AlertBackend {
+  private phoneNumbers: string[];
+  private region: string;
+  private snsClient: SNSClient;
+
+  constructor(phoneNumbers: string[], region: string, accessKeyId?: string, secretAccessKey?: string) {
+    this.phoneNumbers = phoneNumbers;
+    this.region = region;
+
+    // Configure SNS client with credentials if provided, otherwise use default credential chain
+    const clientConfig: any = { region };
+    if (accessKeyId && secretAccessKey) {
+      clientConfig.credentials = {
+        accessKeyId,
+        secretAccessKey,
+      };
+    }
+
+    this.snsClient = new SNSClient(clientConfig);
+  }
+
+  getName(): string {
+    return `AWS SNS (${this.phoneNumbers.length} recipient${this.phoneNumbers.length > 1 ? 's' : ''})`;
+  }
+
+  async sendAlert(message: AlertMessage): Promise<void> {
+    const icon = message.severity === 'critical' ? '🚨' : '⚠️';
+    const title = message.severity === 'critical' ? 'CRITICAL FUEL ALERT' : 'Low Fuel Warning';
+    const body = `${icon} ${title}\n` +
+                 `Vehicle: ${message.vehicleName}\n` +
+                 `Range: ${message.range} miles remaining\n` +
+                 (message.severity === 'critical' ? 'Get gas immediately!' : 'Time to refuel soon.');
+
+    console.log(`📱 Sending SMS via AWS SNS to ${this.phoneNumbers.length} recipient(s)...`);
+
+    // Send to all phone numbers
+    const promises = this.phoneNumbers.map(async (phoneNumber) => {
+      try {
+        const command = new PublishCommand({
+          Message: body,
+          PhoneNumber: phoneNumber,
+        });
+
+        const result = await this.snsClient.send(command);
+        console.log(`   ✅ Sent to ${phoneNumber} (MessageId: ${result.MessageId})`);
+        return result;
+      } catch (error) {
+        console.error(`   ❌ Failed to send to ${phoneNumber}:`, error);
+        throw error;
+      }
+    });
+
+    await Promise.all(promises);
+    console.log(`\n✅ All AWS SNS messages sent successfully!\n`);
+  }
+}
+
+/**
  * Create the appropriate alert backend based on environment
  */
 export function createAlertBackend(): AlertBackend {
   const backendType = process.env.ALERT_BACKEND || 'console';
 
   switch (backendType.toLowerCase()) {
-    case 'twilio-trial':
-      const trialToPhone = process.env.TWILIO_TO_PHONE;
-      const trialFromPhone = process.env.TWILIO_FROM_PHONE;
-      const trialAccountSid = process.env.TWILIO_ACCOUNT_SID;
-      const trialAuthToken = process.env.TWILIO_AUTH_TOKEN;
-
-      if (!trialToPhone || !trialFromPhone || !trialAccountSid || !trialAuthToken) {
-        console.error('❌ Missing required Twilio environment variables:');
-        if (!trialToPhone) console.error('  - TWILIO_TO_PHONE');
-        if (!trialFromPhone) console.error('  - TWILIO_FROM_PHONE');
-        if (!trialAccountSid) console.error('  - TWILIO_ACCOUNT_SID');
-        if (!trialAuthToken) console.error('  - TWILIO_AUTH_TOKEN');
-        throw new Error('Missing Twilio configuration');
-      }
-
-      const trialToPhoneNumbers = trialToPhone.split(',').map(num => num.trim()).filter(num => num.length > 0);
-
-      if (trialToPhoneNumbers.length === 0) {
-        throw new Error('TWILIO_TO_PHONE must contain at least one phone number');
-      }
-
-      return new TwilioTrialSMSAlertBackend(trialToPhoneNumbers, trialFromPhone, trialAccountSid, trialAuthToken);
-
-    case 'sms':
-    case 'twilio':
-    case 'twilio-paid':
-      const toPhone = process.env.TWILIO_TO_PHONE;
-      const fromPhone = process.env.TWILIO_FROM_PHONE;
-      const accountSid = process.env.TWILIO_ACCOUNT_SID;
-      const authToken = process.env.TWILIO_AUTH_TOKEN;
-
-      if (!toPhone || !fromPhone || !accountSid || !authToken) {
-        console.error('❌ Missing required Twilio environment variables:');
-        if (!toPhone) console.error('  - TWILIO_TO_PHONE');
-        if (!fromPhone) console.error('  - TWILIO_FROM_PHONE');
-        if (!accountSid) console.error('  - TWILIO_ACCOUNT_SID');
-        if (!authToken) console.error('  - TWILIO_AUTH_TOKEN');
-        throw new Error('Missing Twilio configuration');
-      }
-
-      const toPhoneNumbers = toPhone.split(',').map(num => num.trim()).filter(num => num.length > 0);
-
-      if (toPhoneNumbers.length === 0) {
-        throw new Error('TWILIO_TO_PHONE must contain at least one phone number');
-      }
-
-      return new TwilioSMSAlertBackend(toPhoneNumbers, fromPhone, accountSid, authToken);
-
     case 'tmobile-email':
     case 'email':
       const phones = process.env.TMOBILE_PHONES;
@@ -329,6 +236,35 @@ export function createAlertBackend(): AlertBackend {
         smtpPassword,
         fromEmail
       );
+
+    case 'sns':
+    case 'aws-sns':
+    case 'aws':
+      const snsPhones = process.env.AWS_SNS_PHONES;
+      const snsRegion = process.env.AWS_REGION || 'us-east-1';
+      const snsAccessKeyId = process.env.AWS_ACCESS_KEY_ID;
+      const snsSecretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
+
+      if (!snsPhones) {
+        console.error('❌ Missing required AWS SNS environment variables:');
+        console.error('  - AWS_SNS_PHONES (comma-separated phone numbers with country code, e.g., +15551234567)');
+        throw new Error('Missing AWS SNS configuration');
+      }
+
+      const snsPhoneNumbers = snsPhones.split(',').map(num => num.trim()).filter(num => num.length > 0);
+
+      if (snsPhoneNumbers.length === 0) {
+        throw new Error('AWS_SNS_PHONES must contain at least one phone number');
+      }
+
+      // Validate phone numbers have country code
+      for (const phone of snsPhoneNumbers) {
+        if (!phone.startsWith('+')) {
+          console.warn(`⚠️  Warning: Phone number "${phone}" should start with + and country code (e.g., +1 for US)`);
+        }
+      }
+
+      return new AwsSnsAlertBackend(snsPhoneNumbers, snsRegion, snsAccessKeyId, snsSecretAccessKey);
 
     case 'console':
     default:

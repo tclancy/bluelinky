@@ -27,11 +27,11 @@
   "author": "Hacksore",
   "license": "MIT",
   "dependencies": {
+    "@aws-sdk/client-sns": "^3.988.0",
     "got": "^9.6.0",
     "nodemailer": "^8.0.1",
     "push-receiver": "^2.1.1",
     "tough-cookie": "^4.0.0",
-    "twilio": "^5.12.1",
     "undici": "^6.10.2",
     "winston": "^3.3.3"
   },

@@ -10,24 +10,66 @@ On your Linux server, you only need:
 
 That's it! Everything else (Node.js, npm packages, cron) runs inside the container.
 
-## Initial Setup
+## Deployed Instance (plexpi)
 
-### 1. Copy Files to Server
+**Current deployment:** Running on plexpi.local (192.168.68.54)
 
-Copy the entire bluelinky directory to your Linux server:
+- Vehicle: 2020 Santa Fe
+- Alert Backend: T-Mobile Email-to-SMS
+- Schedule: Every hour at :00
+- SSH alias: `plexclaude`
 
+### Quick Reference Commands
+
+**View logs:**
 ```bash
-# From your local machine
-scp -r /path/to/bluelinky user@server:/home/user/bluelinky
+ssh plexclaude "docker logs -f bluelinky-fuel-monitor"
 ```
 
-Or clone from git:
+**View cron execution logs:**
+```bash
+ssh plexclaude "docker exec bluelinky-fuel-monitor cat /var/log/fuel-monitor/cron.log"
+```
+
+**Manual test run:**
+```bash
+ssh plexclaude "docker exec bluelinky-fuel-monitor sh -c 'cd /app && export \$(grep -v \"^#\" .env | xargs) && npx tsx monitor-fuel.ts'"
+```
+
+**Restart container:**
+```bash
+ssh plexclaude "cd ~/fuelbot/deployment && docker compose restart"
+```
+
+**Rebuild and restart:**
+```bash
+ssh plexclaude "cd ~/fuelbot/deployment && docker compose down && docker compose up -d --build"
+```
+
+## Initial Setup
+
+### 1. Clone Repository to Server
+
+Clone the fuelbot repository to your Linux server:
 
 ```bash
 # On the server
-git clone <your-repo-url> bluelinky
-cd bluelinky
-git checkout claude/bluelink-fuel-setup
+cd ~
+git clone git@github.com:tclancy/bluelinky.git fuelbot
+cd fuelbot
+```
+
+Alternatively, if you don't have SSH access to GitHub from the server:
+
+```bash
+# From your local machine
+scp -r /path/to/fuelbot user@server:/home/user/fuelbot
+# Then on the server, set up git:
+cd ~/fuelbot
+git init
+git remote add origin git@github.com:tclancy/bluelinky.git
+git fetch origin
+git reset --hard origin/master
 ```
 
 ### 2. Create .env File
@@ -35,7 +77,7 @@ git checkout claude/bluelink-fuel-setup
 Create a `.env` file in the bluelinky directory with your credentials:
 
 ```bash
-cd /home/user/bluelinky
+cd ~/fuelbot
 cp .env.example .env
 nano .env  # or vim, or any editor
 ```
@@ -49,14 +91,23 @@ BLUELINK_PIN=1234
 BLUELINK_BRAND=hyundai
 BLUELINK_REGION=US
 
-# For production SMS alerts
-ALERT_BACKEND=sms
+# For production alerts - choose one backend:
 
-# Twilio configuration
-TWILIO_ACCOUNT_SID=your_account_sid
-TWILIO_AUTH_TOKEN=your_auth_token
-TWILIO_FROM_PHONE=+15551234567
-TWILIO_TO_PHONE=+15559876543,+15558675309
+# Option 1: AWS SNS (CHEAPEST - no phone number needed, $0.006/SMS)
+ALERT_BACKEND=sns
+AWS_SNS_PHONES=+15551234567,+15559876543
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=your_access_key_id
+AWS_SECRET_ACCESS_KEY=your_secret_access_key
+
+# Option 2: T-Mobile Email-to-SMS (FREE but unreliable - may get blocked)
+# ALERT_BACKEND=tmobile-email
+# TMOBILE_PHONES=5551234567,5559876543
+# EMAIL_FROM=youremail@gmail.com
+# EMAIL_SMTP_HOST=smtp.gmail.com
+# EMAIL_SMTP_PORT=587
+# EMAIL_SMTP_USER=youremail@gmail.com
+# EMAIL_SMTP_PASSWORD=your_gmail_app_password
 ```
 
 ### 3. Build and Start the Container
@@ -114,13 +165,13 @@ To change the schedule, edit `deployment/crontab`:
 
 ```bash
 # Run every 2 hours
-0 */2 * * * cd /app && export $(grep -v '^#' .env | xargs) && /usr/local/bin/node /usr/local/bin/tsx monitor-fuel.ts >> /var/log/fuel-monitor/cron.log 2>&1
+0 */2 * * * cd /app && export $(grep -v '^#' .env | xargs) && npx tsx monitor-fuel.ts >> /var/log/fuel-monitor/cron.log 2>&1
 
 # Run twice daily (6am and 6pm UTC)
-0 6,18 * * * cd /app && export $(grep -v '^#' .env | xargs) && /usr/local/bin/node /usr/local/bin/tsx monitor-fuel.ts >> /var/log/fuel-monitor/cron.log 2>&1
+0 6,18 * * * cd /app && export $(grep -v '^#' .env | xargs) && npx tsx monitor-fuel.ts >> /var/log/fuel-monitor/cron.log 2>&1
 
 # Run every 30 minutes
-*/30 * * * * cd /app && export $(grep -v '^#' .env | xargs) && /usr/local/bin/node /usr/local/bin/tsx monitor-fuel.ts >> /var/log/fuel-monitor/cron.log 2>&1
+*/30 * * * * cd /app && export $(grep -v '^#' .env | xargs) && npx tsx monitor-fuel.ts >> /var/log/fuel-monitor/cron.log 2>&1
 ```
 
 After changing the crontab, rebuild and restart:
@@ -153,25 +204,28 @@ Once deployed, you can manually trigger a check:
 
 ```bash
 # Run a manual check
-docker exec bluelinky-fuel-monitor /bin/bash -c "cd /app && export \$(grep -v '^#' .env | xargs) && /usr/local/bin/node /usr/local/bin/tsx monitor-fuel.ts"
+docker exec bluelinky-fuel-monitor /bin/bash -c "cd /app && export \$(grep -v '^#' .env | xargs) && npx tsx monitor-fuel.ts"
 
 # Force a test alert
-docker exec bluelinky-fuel-monitor /bin/bash -c "cd /app && export \$(grep -v '^#' .env | xargs) TEST_ALERT=low && /usr/local/bin/node /usr/local/bin/tsx monitor-fuel.ts"
+docker exec bluelinky-fuel-monitor /bin/bash -c "cd /app && export \$(grep -v '^#' .env | xargs) TEST_ALERT=low && npx tsx monitor-fuel.ts"
 ```
 
 ## Updating the Code
 
-If you make changes to the code:
+When code changes are committed to the repository:
 
 ```bash
-cd /home/user/bluelinky
-git pull  # or copy new files
+# On the server
+cd ~/fuelbot
+git pull origin master
 
-# Rebuild and restart
+# Rebuild and restart the container
 cd deployment
-docker-compose down
-docker-compose up -d --build
+docker compose down
+docker compose up -d --build
 ```
+
+**Note:** The `.env` file is gitignored, so your credentials are safe during updates.
 
 ## Stopping the Monitor
 
@@ -192,6 +246,69 @@ Complete removal (destroys state):
 ```bash
 docker-compose down -v
 ```
+
+## AWS SNS Setup (Recommended)
+
+AWS SNS is the most cost-effective option with no monthly fees and no phone number needed.
+
+### Step 1: Create AWS Account
+
+If you don't have one already, create a free AWS account at https://aws.amazon.com
+
+### Step 2: Create IAM User for SNS
+
+1. Go to IAM Console: https://console.aws.amazon.com/iam/
+2. Click "Users" → "Create user"
+3. User name: `fuel-monitor-sns`
+4. Click "Next"
+5. Select "Attach policies directly"
+6. Search for and select: `AmazonSNSFullAccess`
+7. Click "Next" → "Create user"
+
+### Step 3: Create Access Key
+
+1. Click on the newly created user
+2. Go to "Security credentials" tab
+3. Click "Create access key"
+4. Select "Application running outside AWS"
+5. Click "Next" → "Create access key"
+6. **Copy the Access Key ID and Secret Access Key** (you won't see the secret again!)
+
+### Step 4: Configure in .env
+
+Add these to your `.env` file:
+
+```env
+ALERT_BACKEND=sns
+AWS_SNS_PHONES=+15551234567  # Your phone number with +1 country code
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+```
+
+### Step 5: Move Out of SNS Sandbox (Optional)
+
+By default, AWS SNS starts in sandbox mode and can only send to verified phone numbers.
+
+**To verify a number in sandbox mode:**
+1. Go to SNS Console: https://console.aws.amazon.com/sns/
+2. Click "Text messaging (SMS)" → "Sandbox destination phone numbers"
+3. Click "Add phone number"
+4. Enter your phone number and verify it
+
+**To send to ANY number (production mode):**
+1. In SNS Console, go to "Text messaging (SMS)" → "Account information"
+2. Click "Exit sandbox"
+3. Fill out the request form (usually approved in 24 hours)
+4. Once approved, you can send to any phone number
+
+### Cost Breakdown
+
+- **Free tier:** 1000 SMS/month for first 12 months
+- **After free tier:** ~$0.00645 per SMS in US
+- **Monthly cost for this project:** ~$0.05/month (checking hourly = ~8 alerts/month worst case)
+
+Compare to T-Mobile email gateway: Free but unreliable (may be blocked by carrier)
 
 ## Troubleshooting
 

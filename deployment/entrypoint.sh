@@ -40,7 +40,7 @@ echo "✓ Required environment variables validated"
 echo ""
 echo "Running initial fuel check..."
 cd /app
-/usr/local/bin/node /usr/local/bin/tsx monitor-fuel.ts
+npx tsx monitor-fuel.ts
 
 if [ $? -eq 0 ]; then
     echo ""

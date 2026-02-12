@@ -103,32 +103,41 @@ We now have automated scheduled monitoring via Docker and cron!
 SMS alerts are fully implemented and tested!
 
 **What We Built:**
-- [alert-backends.ts](alert-backends.ts) - TwilioSMSAlertBackend with multi-recipient support
-- Environment variable configuration for Twilio credentials
+- [alert-backends.ts](alert-backends.ts) - Multiple backend options (AWS SNS, T-Mobile Email, Console)
+- Environment variable configuration for credentials
 - Test mode for validating alerts without waiting for low fuel
 
 **Features:**
-- ✅ Sends SMS via Twilio API
+- ✅ AWS SNS backend (no phone number needed, ~$0.006/SMS)
+- ✅ T-Mobile email-to-SMS backend (free but unreliable)
+- ✅ Console backend for development
 - ✅ Supports multiple recipients (comma-separated phone numbers)
 - ✅ Different message formats for low vs critical alerts
-- ✅ Parallel SMS delivery to all recipients
+- ✅ Parallel message delivery to all recipients
 - ✅ Comprehensive error handling
 - ✅ Test mode with `TEST_ALERT` environment variable
 
-**Setup:**
-1. Create Twilio account (free trial includes $15 credit)
-2. Get a Twilio phone number (~$1/month)
+**Setup (AWS SNS - Recommended):**
+1. Create AWS account (free tier: 1000 SMS/month for 12 months)
+2. Create IAM user with SNS permissions
 3. Add credentials to .env:
    ```env
-   ALERT_BACKEND=sms
-   TWILIO_ACCOUNT_SID=your_account_sid
-   TWILIO_AUTH_TOKEN=your_auth_token
-   TWILIO_FROM_PHONE=+15551234567
-   TWILIO_TO_PHONE=+15559876543,+15558675309
+   ALERT_BACKEND=sns
+   AWS_SNS_PHONES=+15551234567
+   AWS_REGION=us-east-1
+   AWS_ACCESS_KEY_ID=your_key
+   AWS_SECRET_ACCESS_KEY=your_secret
    ```
 4. Test with `npm run test-alert`
 
-**Cost:** ~$0.01 per SMS message
+**Cost:** ~$0.006 per SMS message (no monthly fees!)
+
+### Alternative: T-Mobile Email-to-SMS (Free but unreliable)
+
+- No phone number rental needed
+- Pay only per message: ~$0.006 per SMS
+- Free tier: 1000 SMS/month for first 12 months
+- Setup: See `.env.example` for AWS_SNS_* configuration
 
 ---
 
@@ -314,8 +323,9 @@ All credentials are loaded from environment variables for better security:
 **Optional Variables:**
 - `BLUELINK_BRAND` (default: `hyundai`)
 - `BLUELINK_REGION` (default: `US`)
-- `ALERT_BACKEND` (default: `console`, options: `console` | `sms`)
-- `TWILIO_*` variables (required if using SMS backend)
+- `ALERT_BACKEND` (default: `console`, options: `console` | `sns` | `tmobile-email`)
+- `AWS_SNS_*` variables (required if using AWS SNS backend - **recommended for lowest cost**)
+- `TMOBILE_*` and `EMAIL_*` variables (required if using T-Mobile email-to-SMS backend)
 
 ---
 
