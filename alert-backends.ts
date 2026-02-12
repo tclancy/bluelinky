@@ -196,6 +196,63 @@ export class AwsSnsAlertBackend implements AlertBackend {
 }
 
 /**
+ * AWS SNS Topic Backend - Sends alerts to an SNS topic (most flexible!)
+ * Works with email, SMS subscriptions, or any SNS-supported protocol
+ * No sandbox restrictions or origination entity issues
+ */
+export class AwsSnsTopicAlertBackend implements AlertBackend {
+  private topicArn: string;
+  private region: string;
+  private snsClient: SNSClient;
+
+  constructor(topicArn: string, region: string, accessKeyId?: string, secretAccessKey?: string) {
+    this.topicArn = topicArn;
+    this.region = region;
+
+    // Configure SNS client with credentials if provided, otherwise use default credential chain
+    const clientConfig: any = { region };
+    if (accessKeyId && secretAccessKey) {
+      clientConfig.credentials = {
+        accessKeyId,
+        secretAccessKey,
+      };
+    }
+
+    this.snsClient = new SNSClient(clientConfig);
+  }
+
+  getName(): string {
+    return `AWS SNS Topic (${this.topicArn.split(':').pop()})`;
+  }
+
+  async sendAlert(message: AlertMessage): Promise<void> {
+    const icon = message.severity === 'critical' ? '🚨' : '⚠️';
+    const title = message.severity === 'critical' ? 'CRITICAL FUEL ALERT' : 'Low Fuel Warning';
+    const body = `${icon} ${title}\n` +
+                 `Vehicle: ${message.vehicleName}\n` +
+                 `Range: ${message.range} miles remaining\n` +
+                 (message.severity === 'critical' ? 'Get gas immediately!' : 'Time to refuel soon.');
+
+    console.log(`📱 Sending alert to SNS topic...`);
+
+    try {
+      const command = new PublishCommand({
+        TopicArn: this.topicArn,
+        Subject: title,
+        Message: body,
+      });
+
+      const result = await this.snsClient.send(command);
+      console.log(`   ✅ Published to topic (MessageId: ${result.MessageId})`);
+      console.log(`\n✅ Alert sent to all topic subscribers!\n`);
+    } catch (error) {
+      console.error(`   ❌ Failed to publish to topic:`, error);
+      throw error;
+    }
+  }
+}
+
+/**
  * Create the appropriate alert backend based on environment
  */
 export function createAlertBackend(): AlertBackend {
@@ -237,17 +294,26 @@ export function createAlertBackend(): AlertBackend {
         fromEmail
       );
 
+    case 'sns-topic':
     case 'sns':
     case 'aws-sns':
     case 'aws':
-      const snsPhones = process.env.AWS_SNS_PHONES;
+      const topicArn = process.env.AWS_SNS_TOPIC_ARN;
       const snsRegion = process.env.AWS_REGION || 'us-east-1';
       const snsAccessKeyId = process.env.AWS_ACCESS_KEY_ID;
       const snsSecretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
 
+      // If Topic ARN is provided, use topic-based backend (easier, no sandbox issues)
+      if (topicArn) {
+        return new AwsSnsTopicAlertBackend(topicArn, snsRegion, snsAccessKeyId, snsSecretAccessKey);
+      }
+
+      // Otherwise, fall back to direct SMS (requires phone numbers)
+      const snsPhones = process.env.AWS_SNS_PHONES;
+
       if (!snsPhones) {
         console.error('❌ Missing required AWS SNS environment variables:');
-        console.error('  - AWS_SNS_PHONES (comma-separated phone numbers with country code, e.g., +15551234567)');
+        console.error('  - AWS_SNS_TOPIC_ARN (recommended) OR AWS_SNS_PHONES');
         throw new Error('Missing AWS SNS configuration');
       }
 
