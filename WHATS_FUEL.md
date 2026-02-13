@@ -2,7 +2,9 @@
 
 ## Project Goal
 
-Build an SMS alert system that monitors our 2020 Hyundai Santa Fe's fuel level via the Bluelink API and sends text message alerts when the gas is running low.
+Build an SMS alert system that monitors our 2020 Hyundai Santa Fe's fuel level
+ via the Bluelink API and sends text message alerts when the gas is running low.
+ Except by SMS I mean [Amazon SNS, sadly via a topic & email.](https://781158438931-p6rnpdzc.us-east-1.console.aws.amazon.com/sns/v3/home?region=us-east-1#/topic/arn:aws:sns:us-east-1:781158438931:FuelBot)
 
 ## Current Status
 

@@ -3,6 +3,6 @@
 # Logs to /var/log/fuel-monitor/cron.log
 
 # Run monitor-fuel (environment loaded from /etc/environment)
-0 * * * * cd /app && npx tsx monitor-fuel.ts >> /var/log/fuel-monitor/cron.log 2>&1
+0 * * * * cd /app && /usr/local/bin/npx tsx monitor-fuel.ts >> /var/log/fuel-monitor/cron.log 2>&1
 
 # Keep a newline at the end for cron to work properly
