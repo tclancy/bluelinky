@@ -2,7 +2,9 @@
 # Runs every hour at the top of the hour
 # Logs to /var/log/fuel-monitor/cron.log
 
+PATH=/usr/local/bin:/usr/bin:/bin
+
 # Run monitor-fuel (environment loaded from /etc/environment)
-0 * * * * cd /app && /usr/local/bin/npx tsx monitor-fuel.ts >> /var/log/fuel-monitor/cron.log 2>&1
+0 * * * * cd /app && npx tsx monitor-fuel.ts >> /var/log/fuel-monitor/cron.log 2>&1
 
 # Keep a newline at the end for cron to work properly

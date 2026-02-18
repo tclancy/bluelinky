@@ -13,13 +13,12 @@ if [ ! -f /app/.env ]; then
     echo "  BLUELINK_USERNAME"
     echo "  BLUELINK_PASSWORD"
     echo "  BLUELINK_PIN"
-    echo "  ALERT_BACKEND (console or sms)"
+    echo "  ALERT_BACKEND (console or ntfy)"
     echo ""
-    echo "For SMS alerts, also add:"
-    echo "  TWILIO_ACCOUNT_SID"
-    echo "  TWILIO_AUTH_TOKEN"
-    echo "  TWILIO_FROM_PHONE"
-    echo "  TWILIO_TO_PHONE"
+    echo "For ntfy alerts, also add:"
+    echo "  NTFY_URL"
+    echo "  NTFY_USERNAME"
+    echo "  NTFY_PASSWORD"
     exit 1
 fi
 

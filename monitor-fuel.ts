@@ -24,16 +24,14 @@ if (!username || !password || !pin) {
 const THRESHOLD_LOW = 50;
 const THRESHOLD_CRITICAL = 15;
 
-// Create alert backend (console for dev, can be switched to SMS via env var)
-console.log('DEBUG: process.env.ALERT_BACKEND =', process.env.ALERT_BACKEND);
-console.log('DEBUG: process.env.AWS_SNS_TOPIC_ARN =', process.env.AWS_SNS_TOPIC_ARN);
 const alertBackend: AlertBackend = createAlertBackend();
 
 // Test mode - force an alert for testing
 const TEST_ALERT = process.env.TEST_ALERT?.toLowerCase();
 
-// State file to track sent alerts
-const STATE_FILE = path.join(process.cwd(), '.fuel-alert-state.json');
+// State file to track sent alerts (lives in /app/state so the Docker volume
+// only needs to cover that subdirectory rather than all of /app)
+const STATE_FILE = path.join(process.cwd(), 'state', '.fuel-alert-state.json');
 
 interface AlertState {
   alert50Sent: boolean;
