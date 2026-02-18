@@ -29,8 +29,9 @@ const alertBackend: AlertBackend = createAlertBackend();
 // Test mode - force an alert for testing
 const TEST_ALERT = process.env.TEST_ALERT?.toLowerCase();
 
-// State file to track sent alerts
-const STATE_FILE = path.join(process.cwd(), '.fuel-alert-state.json');
+// State file to track sent alerts (lives in /app/state so the Docker volume
+// only needs to cover that subdirectory rather than all of /app)
+const STATE_FILE = path.join(process.cwd(), 'state', '.fuel-alert-state.json');
 
 interface AlertState {
   alert50Sent: boolean;

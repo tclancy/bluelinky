@@ -9,7 +9,7 @@ services:
     # Mount .env file from parent directory
     volumes:
       - ../.env:/app/.env:ro
-      - fuel-state:/app
+      - fuel-state:/app/state
 
     # Keep container running
     stdin_open: true
@@ -26,5 +26,5 @@ services:
       retries: 3
 
 volumes:
-  # Persist the state file across container restarts
+  # Persist only the alert state directory, not all of /app
   fuel-state:

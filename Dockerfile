@@ -32,8 +32,8 @@ RUN chmod 0644 /etc/cron.d/fuel-monitor
 # Apply cron job
 RUN crontab /etc/cron.d/fuel-monitor
 
-# Create log directory
-RUN mkdir -p /var/log/fuel-monitor
+# Create log directory and state directory
+RUN mkdir -p /var/log/fuel-monitor /app/state
 
 # Create entrypoint script
 COPY deployment/entrypoint.sh /entrypoint.sh
