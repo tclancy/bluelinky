@@ -27,9 +27,7 @@
   "author": "Hacksore",
   "license": "MIT",
   "dependencies": {
-    "@aws-sdk/client-sns": "^3.988.0",
     "got": "^9.6.0",
-    "nodemailer": "^8.0.1",
     "push-receiver": "^2.1.1",
     "tough-cookie": "^4.0.0",
     "undici": "^6.10.2",
@@ -51,7 +49,6 @@
     "@types/got": "^9.4.4",
     "@types/jest": "^29.5.12",
     "@types/node": "^20.11.30",
-    "@types/nodemailer": "^7.0.9",
     "@typescript-eslint/eslint-plugin": "^7.4.0",
     "@typescript-eslint/parser": "^7.4.0",
     "babel-jest": "^29.7.0",
