@@ -2,13 +2,15 @@ import BlueLinky from './src/index.ts';
 import * as fs from 'fs';
 import * as path from 'path';
 import { createAlertBackend, AlertBackend } from './alert-backends.ts';
+import { Brand, VehicleStatus } from './src/interfaces/common.interfaces.ts';
+import { REGION } from './src/constants.ts';
 
 // Load credentials from environment variables
 const username = process.env.BLUELINK_USERNAME;
 const password = process.env.BLUELINK_PASSWORD;
 const pin = process.env.BLUELINK_PIN;
-const brand = process.env.BLUELINK_BRAND || 'hyundai';
-const region = process.env.BLUELINK_REGION || 'US';
+const brand = (process.env.BLUELINK_BRAND || 'hyundai') as Brand;
+const region = (process.env.BLUELINK_REGION || 'US') as REGION;
 
 // Validate required environment variables
 if (!username || !password || !pin) {
@@ -97,8 +99,9 @@ async function monitorFuel() {
         process.exit(1);
       }
 
-      const currentRange = status.engine.range;
-      const lastUpdate = status.lastupdate;
+      const parsedStatus = status as VehicleStatus;
+      const currentRange = parsedStatus.engine.range;
+      const lastUpdate = parsedStatus.lastupdate;
 
       console.log(`Alert Backend: ${alertBackend.getName()}`);
       console.log(`Vehicle: ${vehicle.name()}`);

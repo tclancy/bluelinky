@@ -7,15 +7,62 @@ An unofficial nodejs API wrapper for Hyundai BlueLink
 
 ## This Fork
 
-This fork contains a bit of vibe-coding that may prove useful to others. It
-includes a couple of files to support `monitor-fuel.js`, which checks the car
-for two different low fuel thresholds and sends an alert one time when it goes
-below the thresholds. Back-ends for console logging, Twilio SMS and a cheapo
-"email my phone number at T-Mobile for SMS" backends are included and work
-based on sets of environment variables defined in `.env.example`. There's also
-a Dockerfile for spinning up an image for running a cron job. If anyone ever
-finds this and wants help, I am happy to expand on this limited explanation.
-Otherwise, see [WHATS_FUEL.md](WHATS_FUEL.md) for more details.
+This fork contains a fuel monitoring tool built on top of the Bluelink API.
+`monitor-fuel.js` checks a 2020 Hyundai Santa Fe for two low-fuel thresholds
+and sends a push notification (via ntfy) when the level drops below them.
+A Dockerfile and docker-compose setup run the monitor as a cron job on the homelab.
+
+See [WHATS_FUEL.md](WHATS_FUEL.md) for detailed history.
+
+## Homelab Deployment
+
+Credentials are managed via **1Password CLI**. Never commit a `.env` file.
+
+### Setting up credentials
+
+1. Create a 1Password item named **"Bluelinky"** (or similar) with these fields:
+   - `username` — Hyundai Bluelink account email
+   - `password` — Hyundai Bluelink account password
+   - `pin` — 4-digit remote-operation PIN
+   - `vin` — Vehicle VIN
+   - `ntfy_url` — Full ntfy topic URL (e.g. `https://notifications.example.com/fuelbot`)
+   - `ntfy_username` — ntfy username
+   - `ntfy_password` — ntfy password
+
+2. On the homelab, generate the `.env` file at deploy time:
+   ```bash
+   op read "op://Private/Bluelinky/username"  # verify 1Password access first
+   op inject -i .env.example -o .env          # if using 1Password secret references
+   # or manually:
+   echo "BLUELINK_USERNAME=$(op read 'op://Private/Bluelinky/username')" > .env
+   echo "BLUELINK_PASSWORD=$(op read 'op://Private/Bluelinky/password')" >> .env
+   echo "BLUELINK_PIN=$(op read 'op://Private/Bluelinky/pin')" >> .env
+   echo "BLUELINK_VIN=$(op read 'op://Private/Bluelinky/vin')" >> .env
+   echo "BLUELINK_BRAND=hyundai" >> .env
+   echo "BLUELINK_REGION=US" >> .env
+   echo "ALERT_BACKEND=ntfy" >> .env
+   echo "NTFY_URL=$(op read 'op://Private/Bluelinky/ntfy_url')" >> .env
+   echo "NTFY_USERNAME=$(op read 'op://Private/Bluelinky/ntfy_username')" >> .env
+   echo "NTFY_PASSWORD=$(op read 'op://Private/Bluelinky/ntfy_password')" >> .env
+   ```
+
+3. Start the container:
+   ```bash
+   cd deployment/
+   docker compose up -d
+   ```
+
+### itguy integration
+
+Add to `~/.config/itguy/itguy.toml`:
+```toml
+[services.bluelinky]
+tag = "bluelinky"
+strategy = "image-pull"
+compose_dir = "/path/to/bluelinky/deployment"
+```
+
+Then `itguy deploy bluelinky` will pull and restart the container.
 
 ## Install
 ```sh
