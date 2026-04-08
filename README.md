@@ -21,7 +21,7 @@ Credentials are managed via **Ansible Vault** in the
 
 ### How credentials work
 
-Secrets live in `ansible/group_vars/homelab/vault.yml` (encrypted). Plain-text
+Secrets live in `ansible/group_vars/plexpi/vault.yml` (encrypted). Plain-text
 variable names in `vars.yml` reference them as `{{ vault_bluelinky_* }}`. An
 Ansible template (`bluelinky.env.j2`) renders the `.env` file on deploy.
 
@@ -37,19 +37,19 @@ itguy deploy bluelinky
 ### Deploying
 
 ```bash
-itguy deploy bluelinky          # clones repo, templates .env + compose, starts container
+itguy deploy bluelinky          # pulls latest code, templates .env, restarts container
 itguy deploy bluelinky --force  # force-recreate (rebuilds image from source)
 ```
 
 ### itguy integration
 
-Add to `~/.config/itguy/itguy.toml` on the homelab:
+Add to `~/.config/itguy/itguy.toml` on plexpi:
 
 ```toml
 [services.bluelinky]
 tag = "bluelinky"
 strategy = "image-pull"
-compose_dir = "/home/tom/docker/bluelinky"
+compose_dir = "/home/pi/fuelbot/deployment"
 ```
 
 ## Install
