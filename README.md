@@ -16,53 +16,41 @@ See [WHATS_FUEL.md](WHATS_FUEL.md) for detailed history.
 
 ## Homelab Deployment
 
-Credentials are managed via **1Password CLI**. Never commit a `.env` file.
+Credentials are managed via **Ansible Vault** in the
+[homelab](https://github.com/tclancy/homelab) repo. Never commit a `.env` file.
 
-### Setting up credentials
+### How credentials work
 
-1. Create a 1Password item named **"Bluelinky"** (or similar) with these fields:
-   - `username` — Hyundai Bluelink account email
-   - `password` — Hyundai Bluelink account password
-   - `pin` — 4-digit remote-operation PIN
-   - `vin` — Vehicle VIN
-   - `ntfy_url` — Full ntfy topic URL (e.g. `https://notifications.example.com/fuelbot`)
-   - `ntfy_username` — ntfy username
-   - `ntfy_password` — ntfy password
+Secrets live in `ansible/group_vars/homelab/vault.yml` (encrypted). Plain-text
+variable names in `vars.yml` reference them as `{{ vault_bluelinky_* }}`. An
+Ansible template (`bluelinky.env.j2`) renders the `.env` file on deploy.
 
-2. On the homelab, generate the `.env` file at deploy time:
-   ```bash
-   op read "op://Private/Bluelinky/username"  # verify 1Password access first
-   op inject -i .env.example -o .env          # if using 1Password secret references
-   # or manually:
-   echo "BLUELINK_USERNAME=$(op read 'op://Private/Bluelinky/username')" > .env
-   echo "BLUELINK_PASSWORD=$(op read 'op://Private/Bluelinky/password')" >> .env
-   echo "BLUELINK_PIN=$(op read 'op://Private/Bluelinky/pin')" >> .env
-   echo "BLUELINK_VIN=$(op read 'op://Private/Bluelinky/vin')" >> .env
-   echo "BLUELINK_BRAND=hyundai" >> .env
-   echo "BLUELINK_REGION=US" >> .env
-   echo "ALERT_BACKEND=ntfy" >> .env
-   echo "NTFY_URL=$(op read 'op://Private/Bluelinky/ntfy_url')" >> .env
-   echo "NTFY_USERNAME=$(op read 'op://Private/Bluelinky/ntfy_username')" >> .env
-   echo "NTFY_PASSWORD=$(op read 'op://Private/Bluelinky/ntfy_password')" >> .env
-   ```
+To add or rotate a credential:
 
-3. Start the container:
-   ```bash
-   cd deployment/
-   docker compose up -d
-   ```
+```bash
+# Add a new vault entry
+ansible-vault encrypt_string 'value' --name 'vault_bluelinky_username'
+# Then paste into vault.yml and run:
+itguy deploy bluelinky
+```
+
+### Deploying
+
+```bash
+itguy deploy bluelinky          # clones repo, templates .env + compose, starts container
+itguy deploy bluelinky --force  # force-recreate (rebuilds image from source)
+```
 
 ### itguy integration
 
-Add to `~/.config/itguy/itguy.toml`:
+Add to `~/.config/itguy/itguy.toml` on the homelab:
+
 ```toml
 [services.bluelinky]
 tag = "bluelinky"
 strategy = "image-pull"
-compose_dir = "/path/to/bluelinky/deployment"
+compose_dir = "/home/tom/docker/bluelinky"
 ```
-
-Then `itguy deploy bluelinky` will pull and restart the container.
 
 ## Install
 ```sh
