@@ -7,15 +7,50 @@ An unofficial nodejs API wrapper for Hyundai BlueLink
 
 ## This Fork
 
-This fork contains a bit of vibe-coding that may prove useful to others. It
-includes a couple of files to support `monitor-fuel.js`, which checks the car
-for two different low fuel thresholds and sends an alert one time when it goes
-below the thresholds. Back-ends for console logging, Twilio SMS and a cheapo
-"email my phone number at T-Mobile for SMS" backends are included and work
-based on sets of environment variables defined in `.env.example`. There's also
-a Dockerfile for spinning up an image for running a cron job. If anyone ever
-finds this and wants help, I am happy to expand on this limited explanation.
-Otherwise, see [WHATS_FUEL.md](WHATS_FUEL.md) for more details.
+This fork contains a fuel monitoring tool built on top of the Bluelink API.
+`monitor-fuel.js` checks a 2020 Hyundai Santa Fe for two low-fuel thresholds
+and sends a push notification (via ntfy) when the level drops below them.
+A Dockerfile and docker-compose setup run the monitor as a cron job on the homelab.
+
+See [WHATS_FUEL.md](WHATS_FUEL.md) for detailed history.
+
+## Homelab Deployment
+
+Credentials are managed via **Ansible Vault** in the
+[homelab](https://github.com/tclancy/homelab) repo. Never commit a `.env` file.
+
+### How credentials work
+
+Secrets live in `ansible/group_vars/homelab/vault.yml` (encrypted). Plain-text
+variable names in `vars.yml` reference them as `{{ vault_bluelinky_* }}`. An
+Ansible template (`bluelinky.env.j2`) renders the `.env` file on deploy.
+
+To add or rotate a credential:
+
+```bash
+# Add a new vault entry
+ansible-vault encrypt_string 'value' --name 'vault_bluelinky_username'
+# Then paste into vault.yml and run:
+itguy deploy bluelinky
+```
+
+### Deploying
+
+```bash
+itguy deploy bluelinky          # clones repo, templates .env + compose, starts container
+itguy deploy bluelinky --force  # force-recreate (rebuilds image from source)
+```
+
+### itguy integration
+
+Add to `~/.config/itguy/itguy.toml` on the homelab:
+
+```toml
+[services.bluelinky]
+tag = "bluelinky"
+strategy = "image-pull"
+compose_dir = "/home/tom/docker/bluelinky"
+```
 
 ## Install
 ```sh
