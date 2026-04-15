@@ -2,16 +2,37 @@
  * Alert Backend - ntfy.sh push notifications
  */
 
-export interface AlertMessage {
+export interface FuelAlertMessage {
+  kind: 'fuel';
   severity: 'low' | 'critical';
   range: number;
   vehicleName: string;
   timestamp: Date;
 }
 
+export interface TpmsAlertMessage {
+  kind: 'tpms';
+  severity: 'warn' | 'critical'; // warn = 1-2 wheels; critical = 3-4 or all flag
+  wheels: string[]; // e.g. ['frontLeft', 'rearRight']
+  vehicleName: string;
+  timestamp: Date;
+}
+
+export type AlertMessage = FuelAlertMessage | TpmsAlertMessage;
+
+/** @deprecated Use FuelAlertMessage directly. */
+export type LegacyAlertMessage = FuelAlertMessage;
+
 export interface AlertBackend {
   sendAlert(message: AlertMessage): Promise<void>;
   getName(): string;
+}
+
+/** Format a wheel list like ['frontLeft', 'rearRight'] → "front-left, rear-right" */
+function formatWheels(wheels: string[]): string {
+  return wheels
+    .map(w => w.replace(/([A-Z])/g, '-$1').toLowerCase())
+    .join(', ');
 }
 
 /**
@@ -23,11 +44,20 @@ export class ConsoleAlertBackend implements AlertBackend {
   }
 
   async sendAlert(message: AlertMessage): Promise<void> {
-    const title = message.severity === 'critical' ? 'CRITICAL FUEL ALERT' : 'Low Fuel Warning';
-    console.log(`\n[ALERT] ${title}`);
-    console.log(`Vehicle: ${message.vehicleName}`);
-    console.log(`Range: ${message.range} miles remaining`);
-    console.log(`Time: ${message.timestamp.toISOString()}\n`);
+    if (message.kind === 'fuel') {
+      const title = message.severity === 'critical' ? 'CRITICAL FUEL ALERT' : 'Low Fuel Warning';
+      console.log(`\n[ALERT] ${title}`);
+      console.log(`Vehicle: ${message.vehicleName}`);
+      console.log(`Range: ${message.range} miles remaining`);
+      console.log(`Time: ${message.timestamp.toISOString()}\n`);
+    } else {
+      const title =
+        message.severity === 'critical' ? 'CRITICAL: TPMS Warning' : 'Tire Pressure Warning';
+      console.log(`\n[ALERT] ${title}`);
+      console.log(`Vehicle: ${message.vehicleName}`);
+      console.log(`Wheels: ${formatWheels(message.wheels)}`);
+      console.log(`Time: ${message.timestamp.toISOString()}\n`);
+    }
   }
 }
 
@@ -53,15 +83,26 @@ export class NtfyAlertBackend implements AlertBackend {
   }
 
   async sendAlert(message: AlertMessage): Promise<void> {
-    const isCritical = message.severity === 'critical';
-    const title = isCritical ? 'CRITICAL: Get gas now!' : 'Low Fuel Warning';
-    const body = `${message.vehicleName} has ${message.range} miles of range remaining.`;
-    const priority = isCritical ? '5' : '4';
+    let title: string;
+    let body: string;
+    let priority: string;
+
+    if (message.kind === 'fuel') {
+      const isCritical = message.severity === 'critical';
+      title = isCritical ? 'CRITICAL: Get gas now!' : 'Low Fuel Warning';
+      body = `${message.vehicleName} has ${message.range} miles of range remaining.`;
+      priority = isCritical ? '5' : '4';
+    } else {
+      const isCritical = message.severity === 'critical';
+      title = isCritical ? 'CRITICAL: Tire Pressure Warning' : 'Tire Pressure Warning';
+      body = `${message.vehicleName}: low pressure on ${formatWheels(message.wheels)}.`;
+      priority = isCritical ? '5' : '3';
+    }
 
     const response = await fetch(this.url, {
       method: 'POST',
       headers: {
-        'Authorization': this.authHeader,
+        Authorization: this.authHeader,
         'Content-Type': 'text/plain',
         'X-Title': title,
         'X-Priority': priority,

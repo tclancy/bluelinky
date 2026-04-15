@@ -3,9 +3,9 @@
 
 FROM node:20-slim
 
-# Install cron
+# Install cron + build tools needed for better-sqlite3 native addon
 RUN apt-get update && \
-    apt-get install -y cron && \
+    apt-get install -y cron python3 make g++ && \
     rm -rf /var/lib/apt/lists/*
 
 # Create app directory

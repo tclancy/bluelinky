@@ -4,7 +4,7 @@
 
 PATH=/usr/local/bin:/usr/bin:/bin
 
-# Run monitor-fuel (environment loaded from /etc/environment)
-0 * * * * cd /app && npx tsx monitor-fuel.ts >> /var/log/fuel-monitor/cron.log 2>&1
+# Run combined vehicle monitor: fuel + TPMS + SQLite history
+0 * * * * cd /app && npx tsx monitor.ts >> /var/log/fuel-monitor/cron.log 2>&1
 
 # Keep a newline at the end for cron to work properly
