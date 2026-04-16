@@ -48,7 +48,7 @@ export function newlyLitWheels(current: TpmsLamps, sentState: TpmsAlertDedup): s
   const wheels: Array<'frontLeft' | 'frontRight' | 'rearLeft' | 'rearRight'> = [
     'frontLeft', 'frontRight', 'rearLeft', 'rearRight',
   ];
-  const result = wheels.filter(w => current[w] && !sentState[w]);
+  const result: string[] = wheels.filter(w => current[w] && !sentState[w]);
   if (current.all && !sentState.allLamps) {
     result.push('allLamps');
   }
