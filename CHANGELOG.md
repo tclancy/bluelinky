@@ -1,5 +1,8 @@
 # Changelog
 
+## 2026-04-16
+- Fix TypeScript build error: annotate `result` as `string[]` in `newlyLitWheels` so `allLamps` push passes type-check (issue #7, PR #6 CI fix)
+
 ## 2026-04-06
 - Add CHANGELOG.md and Dispatch project file (first-class project alignment)
 
