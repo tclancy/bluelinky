@@ -43,7 +43,7 @@ echo "✓ Environment variables exported for cron"
 echo ""
 echo "Running initial fuel check..."
 cd /app
-npx tsx monitor-fuel.ts
+npx tsx monitor.ts
 
 if [ $? -eq 0 ]; then
     echo ""
