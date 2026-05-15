@@ -19,13 +19,15 @@ export class EuropeanBrandAuthStrategy implements AuthStrategy {
     return 'EuropeanBrandAuthStrategy';
   }
 
-  public async login(user: { username: string; password: string; }, options?: { cookieJar?: CookieJar }): Promise<{ code: Code, cookies: CookieJar }> {
+  public async login(
+    user: { username: string; password: string },
+    options?: { cookieJar?: CookieJar }
+  ): Promise<{ code: Code; cookies: CookieJar }> {
     const cookieJar = await initSession(this.environment, options?.cookieJar);
 
     // Build the correct auth URL based on the new KIA/Hyundai authentication
-    const authHost = this.environment.brand === 'kia'
-      ? 'idpconnect-eu.kia.com'
-      : 'idpconnect-eu.hyundai.com';
+    const authHost =
+      this.environment.brand === 'kia' ? 'idpconnect-eu.kia.com' : 'idpconnect-eu.hyundai.com';
 
     const authUrl = `https://${authHost}/auth/api/v2/user/oauth2/authorize?response_type=code&client_id=${this.environment.clientId}&redirect_uri=${this.environment.baseUrl}/api/v1/user/oauth2/redirect&lang=${this.language}&state=ccsp`;
 
@@ -58,7 +60,9 @@ export class EuropeanBrandAuthStrategy implements AuthStrategy {
     }
 
     if (!connectorSessionKey) {
-      throw new Error(`@EuropeanBrandAuthStrategy.login: Could not extract connector_session_key from URL: ${urlToCheck}`);
+      throw new Error(
+        `@EuropeanBrandAuthStrategy.login: Could not extract connector_session_key from URL: ${urlToCheck}`
+      );
     }
 
     // Step 2: POST to signin endpoint
@@ -82,14 +86,16 @@ export class EuropeanBrandAuthStrategy implements AuthStrategy {
       headers: {
         'content-type': 'application/x-www-form-urlencoded',
         'origin': `https://${authHost}`,
-        ...stdHeaders
+        ...stdHeaders,
       },
       followRedirect: false,
       throwHttpErrors: false,
     });
 
     if (signinResponse.statusCode !== 302) {
-      throw new Error(`@EuropeanBrandAuthStrategy.login: Signin failed with status ${signinResponse.statusCode}: ${signinResponse.body}`);
+      throw new Error(
+        `@EuropeanBrandAuthStrategy.login: Signin failed with status ${signinResponse.statusCode}: ${signinResponse.body}`
+      );
     }
 
     // Step 3: Extract authorization code from Location header
@@ -106,7 +112,9 @@ export class EuropeanBrandAuthStrategy implements AuthStrategy {
         const code = altMatch[1];
         return { code: code as Code, cookies: cookieJar };
       }
-      throw new Error(`@EuropeanBrandAuthStrategy.login: Could not extract authorization code from redirect location: ${location}`);
+      throw new Error(
+        `@EuropeanBrandAuthStrategy.login: Could not extract authorization code from redirect location: ${location}`
+      );
     }
 
     const code = codeMatch[1];

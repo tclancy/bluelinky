@@ -20,7 +20,7 @@ services:
 
     # Optional: Healthcheck to ensure container is working
     healthcheck:
-      test: ["CMD", "test", "-f", "/var/log/fuel-monitor/cron.log"]
+      test: ['CMD', 'test', '-f', '/var/log/fuel-monitor/cron.log']
       interval: 5m
       timeout: 10s
       retries: 3

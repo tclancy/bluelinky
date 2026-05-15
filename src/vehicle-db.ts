@@ -117,18 +117,18 @@ export class VehicleDb {
   /** Return the most recent check, or null if no history. */
   getLastCheck(): CheckRow | null {
     return (
-      (this.db
-        .prepare('SELECT * FROM checks ORDER BY id DESC LIMIT 1')
-        .get() as CheckRow | undefined) ?? null
+      (this.db.prepare('SELECT * FROM checks ORDER BY id DESC LIMIT 1').get() as
+        | CheckRow
+        | undefined) ?? null
     );
   }
 
   /** Return the most recent TPMS reading, or null if no history. */
   getLastTpms(): TpmsRow | null {
     return (
-      (this.db
-        .prepare('SELECT * FROM tpms_readings ORDER BY id DESC LIMIT 1')
-        .get() as TpmsRow | undefined) ?? null
+      (this.db.prepare('SELECT * FROM tpms_readings ORDER BY id DESC LIMIT 1').get() as
+        | TpmsRow
+        | undefined) ?? null
     );
   }
 

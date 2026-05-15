@@ -7,6 +7,18 @@ on:
       - main
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: ESLint
+        run: npm run lint
+      - name: Prettier
+        run: npx prettier --check './src/**/*.{js,jsx,ts,tsx}' './__tests__/**/*.{js,jsx,ts,tsx}' './*.ts'
   test:
     runs-on: ubuntu-latest
     steps:

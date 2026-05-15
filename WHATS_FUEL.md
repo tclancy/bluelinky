@@ -3,8 +3,8 @@
 ## Project Goal
 
 Build an SMS alert system that monitors our 2020 Hyundai Santa Fe's fuel level
- via the Bluelink API and sends text message alerts when the gas is running low.
- Except by SMS I mean [Amazon SNS, sadly via a topic & email.](https://781158438931-p6rnpdzc.us-east-1.console.aws.amazon.com/sns/v3/home?region=us-east-1#/topic/arn:aws:sns:us-east-1:781158438931:FuelBot)
+via the Bluelink API and sends text message alerts when the gas is running low.
+Except by SMS I mean [Amazon SNS, sadly via a topic & email.](https://781158438931-p6rnpdzc.us-east-1.console.aws.amazon.com/sns/v3/home?region=us-east-1#/topic/arn:aws:sns:us-east-1:781158438931:FuelBot)
 
 ## Current Status
 
@@ -40,11 +40,13 @@ We can now successfully communicate with the vehicle via Bluelink!
 We now have smart monitoring with dual thresholds and alert deduplication!
 
 **What We Built:**
+
 - [monitor-fuel.ts](monitor-fuel.ts) - Intelligent fuel monitoring script
 - `.fuel-alert-state.json` - State file to track sent alerts (gitignored)
 - npm script: `npm run monitor-fuel` - Run the monitoring check
 
 **Features:**
+
 - ✅ Dual threshold system: 50 miles (low) and 15 miles (critical)
 - ✅ Alert deduplication - won't spam you with the same alert
 - ✅ Smart reset logic - clears alerts when fuel goes back above 50 miles
@@ -53,6 +55,7 @@ We now have smart monitoring with dual thresholds and alert deduplication!
 - ✅ Error handling for API failures
 
 **How It Works:**
+
 1. Check current fuel level from Bluelink
 2. Load previous alert state from file
 3. If range > 50 miles: Clear all alert flags
@@ -62,6 +65,7 @@ We now have smart monitoring with dual thresholds and alert deduplication!
 7. Show status summary
 
 **Alert Logic:**
+
 - **Above 50 miles**: All clear, no alerts, flags reset
 - **Below 50 miles**: One-time "Low Fuel" alert
 - **Below 15 miles**: One-time "Critical" alert (overrides 50-mile alert)
@@ -76,6 +80,7 @@ We now have smart monitoring with dual thresholds and alert deduplication!
 We now have automated scheduled monitoring via Docker and cron!
 
 **What We Built:**
+
 - [Dockerfile](Dockerfile) - Self-contained container with Node.js, npm, and cron
 - [deployment/docker-compose.yml](deployment/docker-compose.yml) - Easy container management
 - [deployment/crontab](deployment/crontab) - Hourly fuel check schedule
@@ -83,6 +88,7 @@ We now have automated scheduled monitoring via Docker and cron!
 - [deployment/README.md](deployment/README.md) - Complete deployment guide
 
 **Features:**
+
 - ✅ Runs every hour automatically (configurable)
 - ✅ Completely self-contained (no host dependency leakage)
 - ✅ Works on any Linux system with Docker
@@ -93,6 +99,7 @@ We now have automated scheduled monitoring via Docker and cron!
 - ✅ Initial validation check before starting cron
 
 **Deployment:**
+
 1. Copy files to Linux server
 2. Create .env with credentials
 3. Run `docker-compose up -d`
@@ -105,11 +112,13 @@ We now have automated scheduled monitoring via Docker and cron!
 SMS alerts are fully implemented and tested!
 
 **What We Built:**
+
 - [alert-backends.ts](alert-backends.ts) - Multiple backend options (AWS SNS, T-Mobile Email, Console)
 - Environment variable configuration for credentials
 - Test mode for validating alerts without waiting for low fuel
 
 **Features:**
+
 - ✅ AWS SNS backend (no phone number needed, ~$0.006/SMS)
 - ✅ T-Mobile email-to-SMS backend (free but unreliable)
 - ✅ Console backend for development
@@ -120,6 +129,7 @@ SMS alerts are fully implemented and tested!
 - ✅ Test mode with `TEST_ALERT` environment variable
 
 **Setup (AWS SNS - Recommended):**
+
 1. Create AWS account (free tier: 1000 SMS/month for 12 months)
 2. Create IAM user with SNS permissions
 3. Add credentials to .env:
@@ -139,7 +149,7 @@ SMS alerts are fully implemented and tested!
 - No phone number rental needed
 - Pay only per message: ~$0.006 per SMS
 - Free tier: 1000 SMS/month for first 12 months
-- Setup: See `.env.example` for AWS_SNS_* configuration
+- Setup: See `.env.example` for AWS*SNS*\* configuration
 
 ---
 
@@ -148,6 +158,7 @@ SMS alerts are fully implemented and tested!
 Production-ready deployment system is now in place!
 
 **What We Achieved:**
+
 - ✅ Secure credential storage (environment variables, not config.json)
 - ✅ Logging and monitoring (cron logs + Docker logs)
 - ✅ Alert fatigue prevention (state file prevents duplicate alerts)
@@ -157,6 +168,7 @@ Production-ready deployment system is now in place!
 - ✅ Health checks (Docker healthcheck configuration)
 
 **Architecture:**
+
 ```
 ┌─────────────────────┐
 │  Docker Container   │
@@ -188,6 +200,7 @@ Production-ready deployment system is now in place!
 ```
 
 **Deployment:**
+
 - See [deployment/README.md](deployment/README.md) for complete guide
 - Works on any Linux server with Docker
 - No pollution of host system
@@ -228,6 +241,7 @@ Production-ready deployment system is now in place!
 ### Bluelink Status Response
 
 **Cached Status** (`refresh: false`):
+
 - Uses server's cached data
 - Fast response (< 2 seconds)
 - Doesn't wake up vehicle
@@ -235,6 +249,7 @@ Production-ready deployment system is now in place!
 - Data may be hours old
 
 **Fresh Status** (`refresh: true`):
+
 - Polls vehicle directly
 - Slow response (30-60 seconds)
 - Drains 12V battery if used too often
@@ -302,11 +317,13 @@ The Bluelink API doesn't have a sandbox mode, so we're testing against the real 
 All credentials are loaded from environment variables for better security:
 
 1. **Copy the example file:**
+
    ```bash
    cp .env.example .env
    ```
 
 2. **Edit `.env` with your credentials:**
+
    ```bash
    BLUELINK_USERNAME=your_email@example.com
    BLUELINK_PASSWORD=your_password
@@ -318,11 +335,13 @@ All credentials are loaded from environment variables for better security:
 3. **The `.env` file is gitignored** - your credentials stay local
 
 **Required Variables:**
+
 - `BLUELINK_USERNAME` - Your Bluelink account email
 - `BLUELINK_PASSWORD` - Your Bluelink account password
 - `BLUELINK_PIN` - Your 4-digit PIN
 
 **Optional Variables:**
+
 - `BLUELINK_BRAND` (default: `hyundai`)
 - `BLUELINK_REGION` (default: `US`)
 - `ALERT_BACKEND` (default: `console`, options: `console` | `sns` | `tmobile-email`)
@@ -353,6 +372,7 @@ All credentials are loaded from environment variables for better security:
 ## Change Log
 
 ### 2026-02-09 (Phase 1)
+
 - ✅ Created config.json with Bluelink credentials
 - ✅ Built get-fuel-level.ts script
 - ✅ Successfully retrieved fuel status: 330 miles range
@@ -360,6 +380,7 @@ All credentials are loaded from environment variables for better security:
 - ✅ Documented project in WHATS_FUEL.md
 
 ### 2026-02-09 (Phase 2)
+
 - ✅ Built monitor-fuel.ts with intelligent alert logic
 - ✅ Implemented dual thresholds: 50 miles (low) and 15 miles (critical)
 - ✅ Added alert deduplication with state file (.fuel-alert-state.json)
@@ -371,6 +392,7 @@ All credentials are loaded from environment variables for better security:
 - ✅ Tested monitoring script successfully
 
 ### 2026-02-09 (Phase 3 & 4 - SMS & Testing)
+
 - ✅ Implemented TwilioSMSAlertBackend with actual Twilio API integration
 - ✅ Added multi-recipient SMS support (comma-separated phone numbers)
 - ✅ Installed twilio npm package
@@ -381,6 +403,7 @@ All credentials are loaded from environment variables for better security:
 - ✅ Verified alerts send to multiple recipients in parallel
 
 ### 2026-02-09 (Phase 5 - Deployment)
+
 - ✅ Created Dockerfile for self-contained deployment
 - ✅ Built deployment/docker-compose.yml for easy container management
 - ✅ Added deployment/crontab with hourly scheduling

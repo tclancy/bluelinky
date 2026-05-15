@@ -25,7 +25,7 @@ const client = new BlueLinky({
   pin,
 });
 
-client.on('ready', async (vehicles) => {
+client.on('ready', async vehicles => {
   try {
     const vehicle = vehicles[0]; // or use client.getVehicle(config.vin)
 
@@ -34,8 +34,8 @@ client.on('ready', async (vehicles) => {
 
     // Get cached status (doesn't drain 12V battery)
     const status = await vehicle.status({
-      refresh: false,  // Use server cache
-      parsed: true     // Get nicely formatted data
+      refresh: false, // Use server cache
+      parsed: true, // Get nicely formatted data
     });
 
     if (status) {
@@ -58,7 +58,7 @@ client.on('ready', async (vehicles) => {
   process.exit(0);
 });
 
-client.on('error', (err) => {
+client.on('error', err => {
   console.error('Login error:', err);
   process.exit(1);
 });

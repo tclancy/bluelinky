@@ -22,10 +22,7 @@ export interface ChineseBrandEnvironment {
   pushRegId: string;
 }
 
-const getEndpoints = (
-  baseUrl: string,
-  clientId: string
-): ChineseBrandEnvironment['endpoints'] => ({
+const getEndpoints = (baseUrl: string, clientId: string): ChineseBrandEnvironment['endpoints'] => ({
   session: `${baseUrl}/api/v1/user/oauth2/authorize?response_type=code&state=test&client_id=${clientId}&redirect_uri=${baseUrl}:443/api/v1/user/oauth2/redirect`,
   login: `${baseUrl}/api/v1/user/signin`,
   language: `${baseUrl}/api/v1/user/language`,
@@ -49,8 +46,7 @@ const getHyundaiEnvironment = (): ChineseBrandEnvironment => {
     clientId,
     appId,
     endpoints: Object.freeze(getEndpoints(baseUrl, clientId)),
-    basicToken:
-      'Basic NzJiM2QwMTktNWJjNy00NDNkLWE0MzctMDhmMzA3Y2YwNmUyOnNlY3JldA==',
+    basicToken: 'Basic NzJiM2QwMTktNWJjNy00NDNkLWE0MzctMDhmMzA3Y2YwNmUyOnNlY3JldA==',
     GCMSenderID: '414998006775',
     providerDeviceId: '59af09e554a9442ab8589c9500d04d2e',
     pushRegId: '1',
@@ -69,16 +65,15 @@ const getKiaEnvironment = (): ChineseBrandEnvironment => {
     clientId,
     appId,
     endpoints: Object.freeze(getEndpoints(baseUrl, clientId)),
-    basicToken: 'Basic OWQ1ZGY5MmEtMDZhZS00MzVmLWI0NTktODMwNGYyZWZjYzY3OnRzWGRrVWcwOEF2MlpaelhPZ1d6Snl4VVQ2eWVTbk5OUWtYWFBSZEtXRUFOd2wxcA==',
+    basicToken:
+      'Basic OWQ1ZGY5MmEtMDZhZS00MzVmLWI0NTktODMwNGYyZWZjYzY3OnRzWGRrVWcwOEF2MlpaelhPZ1d6Snl4VVQ2eWVTbk5OUWtYWFBSZEtXRUFOd2wxcA==',
     GCMSenderID: '345127537656',
     providerDeviceId: '32dedba78045415b92db816e805ed47b',
     pushRegId: 'ogc+GB5gom7zDEQjPhb3lP+bjjM=DG2rQ9Zuq0otwOU7n9y08LKjYpo=',
   };
 };
 
-export const getBrandEnvironment = ({
-  brand,
-}: BrandEnvironmentConfig): ChineseBrandEnvironment => {
+export const getBrandEnvironment = ({ brand }: BrandEnvironmentConfig): ChineseBrandEnvironment => {
   switch (brand) {
     case 'hyundai':
       return Object.freeze(getHyundaiEnvironment());

@@ -5,9 +5,7 @@ import { AuthStrategy, Code, initSession } from './china.authStrategy';
 import Url from 'url';
 
 export class ChineseLegacyAuthStrategy implements AuthStrategy {
-  constructor(
-    private readonly environment: ChineseBrandEnvironment,
-  ) {}
+  constructor(private readonly environment: ChineseBrandEnvironment) {}
 
   public get name(): string {
     return 'ChineseLegacyAuthStrategy';

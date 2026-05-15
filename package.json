@@ -36,11 +36,6 @@
     "undici": "^6.10.2",
     "winston": "^3.3.3"
   },
-  "husky": {
-    "hooks": {
-      "pre-commit": "npm run lint"
-    }
-  },
   "homepage": "https://github.com/Hacksore/bluelinky",
   "devDependencies": {
     "@babel/core": "^7.10.4",
@@ -58,7 +53,6 @@
     "babel-jest": "^29.7.0",
     "cross-env": "^7.0.3",
     "eslint": "^8.57.0",
-    "husky": "^4.2.5",
     "inquirer": "^7.3.0",
     "jest": "^29.7.0",
     "jest-fetch-mock": "^3.0.3",

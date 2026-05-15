@@ -23,56 +23,56 @@ Returns a parsed, structured object with all vehicle information.
 
 ### Engine/Power Data
 
-| Field | Type | Description | Notes |
-|-------|------|-------------|-------|
-| `range` | number | Total range in miles/km | **This is what we use for fuel alerts** |
-| `rangeGas` | number | Gas-only range | Hybrid vehicles only |
-| `rangeEV` | number | Electric range | Hybrid/EV vehicles only |
-| `ignition` | boolean | Engine running status | true = running |
-| `accessory` | boolean | Accessory mode status | true = accessory on |
-| `charging` | boolean | EV charging status | EVs only |
-| `batteryCharge12v` | number | 12V battery percentage | Standard battery |
-| `batteryChargeHV` | number | High voltage battery percentage | EVs only |
-| `timeToFullCharge` | unknown | Time to full charge | EVs only |
-| `plugedTo` | EVPlugTypes | Charging plug type | 0=Unplugged, 1=Fast, 2=Portable, 3=Station |
-| `estimatedCurrentChargeDuration` | number | Charge time estimate (current plug) | EVs only |
-| `estimatedFastChargeDuration` | number | Fast charge time estimate | EVs only |
-| `estimatedPortableChargeDuration` | number | Portable charger time estimate | EVs only |
-| `estimatedStationChargeDuration` | number | Station charge time estimate | EVs only |
+| Field                             | Type        | Description                         | Notes                                      |
+| --------------------------------- | ----------- | ----------------------------------- | ------------------------------------------ |
+| `range`                           | number      | Total range in miles/km             | **This is what we use for fuel alerts**    |
+| `rangeGas`                        | number      | Gas-only range                      | Hybrid vehicles only                       |
+| `rangeEV`                         | number      | Electric range                      | Hybrid/EV vehicles only                    |
+| `ignition`                        | boolean     | Engine running status               | true = running                             |
+| `accessory`                       | boolean     | Accessory mode status               | true = accessory on                        |
+| `charging`                        | boolean     | EV charging status                  | EVs only                                   |
+| `batteryCharge12v`                | number      | 12V battery percentage              | Standard battery                           |
+| `batteryChargeHV`                 | number      | High voltage battery percentage     | EVs only                                   |
+| `timeToFullCharge`                | unknown     | Time to full charge                 | EVs only                                   |
+| `plugedTo`                        | EVPlugTypes | Charging plug type                  | 0=Unplugged, 1=Fast, 2=Portable, 3=Station |
+| `estimatedCurrentChargeDuration`  | number      | Charge time estimate (current plug) | EVs only                                   |
+| `estimatedFastChargeDuration`     | number      | Fast charge time estimate           | EVs only                                   |
+| `estimatedPortableChargeDuration` | number      | Portable charger time estimate      | EVs only                                   |
+| `estimatedStationChargeDuration`  | number      | Station charge time estimate        | EVs only                                   |
 
 ### Chassis/Security Data
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `locked` | boolean | Door lock status (true = locked) |
-| `hoodOpen` | boolean | Hood status (true = open) |
-| `trunkOpen` | boolean | Trunk status (true = open) |
-| `openDoors.frontRight` | boolean | Front right door open status |
-| `openDoors.frontLeft` | boolean | Front left door open status |
-| `openDoors.backLeft` | boolean | Back left door open status |
-| `openDoors.backRight` | boolean | Back right door open status |
-| `tirePressureWarningLamp.rearLeft` | boolean | Rear left tire pressure warning |
-| `tirePressureWarningLamp.frontLeft` | boolean | Front left tire pressure warning |
+| Field                                | Type    | Description                       |
+| ------------------------------------ | ------- | --------------------------------- |
+| `locked`                             | boolean | Door lock status (true = locked)  |
+| `hoodOpen`                           | boolean | Hood status (true = open)         |
+| `trunkOpen`                          | boolean | Trunk status (true = open)        |
+| `openDoors.frontRight`               | boolean | Front right door open status      |
+| `openDoors.frontLeft`                | boolean | Front left door open status       |
+| `openDoors.backLeft`                 | boolean | Back left door open status        |
+| `openDoors.backRight`                | boolean | Back right door open status       |
+| `tirePressureWarningLamp.rearLeft`   | boolean | Rear left tire pressure warning   |
+| `tirePressureWarningLamp.frontLeft`  | boolean | Front left tire pressure warning  |
 | `tirePressureWarningLamp.frontRight` | boolean | Front right tire pressure warning |
-| `tirePressureWarningLamp.rearRight` | boolean | Rear right tire pressure warning |
-| `tirePressureWarningLamp.all` | boolean | Any tire pressure warning |
+| `tirePressureWarningLamp.rearRight`  | boolean | Rear right tire pressure warning  |
+| `tirePressureWarningLamp.all`        | boolean | Any tire pressure warning         |
 
 ### Climate Control Data
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `active` | boolean | Climate control running |
-| `steeringwheelHeat` | boolean | Steering wheel heater on |
-| `sideMirrorHeat` | boolean | Side mirror heat on |
-| `rearWindowHeat` | boolean | Rear window defroster on |
-| `defrost` | boolean | Defrost status |
-| `temperatureSetpoint` | number\|string | Temperature setting |
-| `temperatureUnit` | number | Temperature unit (0=Celsius, 1=Fahrenheit) |
+| Field                 | Type           | Description                                |
+| --------------------- | -------------- | ------------------------------------------ |
+| `active`              | boolean        | Climate control running                    |
+| `steeringwheelHeat`   | boolean        | Steering wheel heater on                   |
+| `sideMirrorHeat`      | boolean        | Side mirror heat on                        |
+| `rearWindowHeat`      | boolean        | Rear window defroster on                   |
+| `defrost`             | boolean        | Defrost status                             |
+| `temperatureSetpoint` | number\|string | Temperature setting                        |
+| `temperatureUnit`     | number         | Temperature unit (0=Celsius, 1=Fahrenheit) |
 
 ### Metadata
 
-| Field | Type | Description |
-|-------|------|-------------|
+| Field        | Type | Description                                    |
+| ------------ | ---- | ---------------------------------------------- |
 | `lastupdate` | Date | Timestamp when data was retrieved from vehicle |
 
 ### Example Response
@@ -128,14 +128,14 @@ Returns a parsed, structured object with all vehicle information.
 
 Returns real-time GPS location. **Note:** This always polls the vehicle directly (no cache).
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `latitude` | number | GPS latitude |
-| `longitude` | number | GPS longitude |
-| `altitude` | number | Altitude |
-| `speed.value` | number | Current speed value |
-| `speed.unit` | number | Speed unit (0=kph, 1=mph) |
-| `heading` | number | Direction of travel in degrees |
+| Field         | Type   | Description                    |
+| ------------- | ------ | ------------------------------ |
+| `latitude`    | number | GPS latitude                   |
+| `longitude`   | number | GPS longitude                  |
+| `altitude`    | number | Altitude                       |
+| `speed.value` | number | Current speed value            |
+| `speed.unit`  | number | Speed unit (0=kph, 1=mph)      |
+| `heading`     | number | Direction of travel in degrees |
 
 ### Example Response
 
@@ -160,10 +160,10 @@ Returns real-time GPS location. **Note:** This always polls the vehicle directly
 
 Returns odometer reading.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `value` | number | Odometer reading |
-| `unit` | number | Unit (0=miles, 1=kilometers) |
+| Field   | Type   | Description                  |
+| ------- | ------ | ---------------------------- |
+| `value` | number | Odometer reading             |
+| `unit`  | number | Unit (0=miles, 1=kilometers) |
 
 ### Example Response
 
@@ -186,29 +186,29 @@ Returns trip statistics for a specific day or month.
 
 #### Monthly Trip Data
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `days` | Array | List of days with trip counts |
-| `durations.drive` | number | Total drive time |
-| `durations.idle` | number | Total idle time |
-| `speed.avg` | number | Average speed |
-| `speed.max` | number | Maximum speed |
-| `distance` | number | Total distance |
+| Field             | Type   | Description                   |
+| ----------------- | ------ | ----------------------------- |
+| `days`            | Array  | List of days with trip counts |
+| `durations.drive` | number | Total drive time              |
+| `durations.idle`  | number | Total idle time               |
+| `speed.avg`       | number | Average speed                 |
+| `speed.max`       | number | Maximum speed                 |
+| `distance`        | number | Total distance                |
 
 #### Daily Trip Data
 
 Includes all monthly fields plus:
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `trips` | Array | Individual trip details |
-| `trips[].start` | Date | Trip start time |
-| `trips[].end` | Date | Trip end time |
-| `trips[].distance` | number | Trip distance |
-| `trips[].speed.avg` | number | Trip average speed |
-| `trips[].speed.max` | number | Trip max speed |
-| `trips[].durations.drive` | number | Drive time |
-| `trips[].durations.idle` | number | Idle time |
+| Field                     | Type   | Description             |
+| ------------------------- | ------ | ----------------------- |
+| `trips`                   | Array  | Individual trip details |
+| `trips[].start`           | Date   | Trip start time         |
+| `trips[].end`             | Date   | Trip end time           |
+| `trips[].distance`        | number | Trip distance           |
+| `trips[].speed.avg`       | number | Trip average speed      |
+| `trips[].speed.max`       | number | Trip max speed          |
+| `trips[].durations.drive` | number | Drive time              |
+| `trips[].durations.idle`  | number | Idle time               |
 
 ### Drive History (EVs)
 
@@ -216,16 +216,16 @@ Includes all monthly fields plus:
 
 Returns energy consumption and efficiency data.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `period` | historyCumulatedTypes | Period type (0=Total, 1=Average, 2=Today) |
-| `consumption.total` | number | Total energy consumption |
-| `consumption.engine` | number | Engine energy use |
-| `consumption.climate` | number | Climate control energy use |
-| `consumption.devices` | number | Device energy use |
-| `consumption.battery` | number | Battery energy use |
-| `regen` | number | Regenerative braking recovery |
-| `distance` | number | Distance traveled |
+| Field                 | Type                  | Description                               |
+| --------------------- | --------------------- | ----------------------------------------- |
+| `period`              | historyCumulatedTypes | Period type (0=Total, 1=Average, 2=Today) |
+| `consumption.total`   | number                | Total energy consumption                  |
+| `consumption.engine`  | number                | Engine energy use                         |
+| `consumption.climate` | number                | Climate control energy use                |
+| `consumption.devices` | number                | Device energy use                         |
+| `consumption.battery` | number                | Battery energy use                        |
+| `regen`               | number                | Regenerative braking recovery             |
+| `distance`            | number                | Distance traveled                         |
 
 ---
 
@@ -235,19 +235,19 @@ Returns energy consumption and efficiency data.
 
 Returns comprehensive monthly vehicle report.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `start` | string | Start date (YYYYMMDD format) |
-| `end` | string | End date (YYYYMMDD format) |
-| `driving.distance` | number | Total distance driven |
-| `driving.startCount` | number | Number of trips started |
-| `driving.durations.drive` | number | Total drive time |
-| `driving.durations.idle` | number | Total idle time |
-| `breakdown` | Array | Vehicle breakdown/fault codes |
-| `breakdown[].ecuIdx` | string | ECU index |
-| `breakdown[].ecuStatus` | string | ECU status |
-| `vehicleStatus.tpms` | boolean | TPMS status |
-| `vehicleStatus.tirePressure.all` | boolean | Any tire pressure issues |
+| Field                            | Type    | Description                   |
+| -------------------------------- | ------- | ----------------------------- |
+| `start`                          | string  | Start date (YYYYMMDD format)  |
+| `end`                            | string  | End date (YYYYMMDD format)    |
+| `driving.distance`               | number  | Total distance driven         |
+| `driving.startCount`             | number  | Number of trips started       |
+| `driving.durations.drive`        | number  | Total drive time              |
+| `driving.durations.idle`         | number  | Total idle time               |
+| `breakdown`                      | Array   | Vehicle breakdown/fault codes |
+| `breakdown[].ecuIdx`             | string  | ECU index                     |
+| `breakdown[].ecuStatus`          | string  | ECU status                    |
+| `vehicleStatus.tpms`             | boolean | TPMS status                   |
+| `vehicleStatus.tirePressure.all` | boolean | Any tire pressure issues      |
 
 ---
 
@@ -259,11 +259,11 @@ Returns comprehensive monthly vehicle report.
 
 Returns current charge limit settings.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `type` | EVChargeModeTypes | Charge mode (0=Fast, 1=Slow) |
-| `distance` | number | Estimated range at target level |
-| `targetLevel` | number | Target charge percentage |
+| Field         | Type              | Description                     |
+| ------------- | ----------------- | ------------------------------- |
+| `type`        | EVChargeModeTypes | Charge mode (0=Fast, 1=Slow)    |
+| `distance`    | number            | Estimated range at target level |
+| `targetLevel` | number            | Target charge percentage        |
 
 ### Set Charge Targets
 
@@ -279,17 +279,17 @@ Sets charge limits for fast and slow charging.
 
 Returns raw, unparsed status data with additional low-level fields:
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `lowFuelLight` | boolean | Low fuel warning light status |
-| `seatHeaterVentInfo` | object | Seat heater/ventilation settings |
-| `lampWireStatus.headLamp` | unknown | Head lamp status |
-| `lampWireStatus.stopLamp` | unknown | Stop lamp status |
-| `lampWireStatus.turnSignalLamp` | unknown | Turn signal status |
-| `windowOpen` | unknown | Window status |
-| `engineRuntime` | unknown | Engine runtime data |
-| `sleepModeCheck` | boolean | Sleep mode status |
-| `remoteIgnition` | boolean | Remote start status |
+| Field                           | Type    | Description                      |
+| ------------------------------- | ------- | -------------------------------- |
+| `lowFuelLight`                  | boolean | Low fuel warning light status    |
+| `seatHeaterVentInfo`            | object  | Seat heater/ventilation settings |
+| `lampWireStatus.headLamp`       | unknown | Head lamp status                 |
+| `lampWireStatus.stopLamp`       | unknown | Stop lamp status                 |
+| `lampWireStatus.turnSignalLamp` | unknown | Turn signal status               |
+| `windowOpen`                    | unknown | Window status                    |
+| `engineRuntime`                 | unknown | Engine runtime data              |
+| `sleepModeCheck`                | boolean | Sleep mode status                |
+| `remoteIgnition`                | boolean | Remote start status              |
 
 ---
 
@@ -299,8 +299,8 @@ Returns raw, unparsed status data with additional low-level fields:
 
 ```typescript
 const status = await vehicle.status({
-  refresh: false,  // Use cached data (safe, fast)
-  parsed: true     // Get structured response
+  refresh: false, // Use cached data (safe, fast)
+  parsed: true, // Get structured response
 });
 
 console.log(`Range: ${status.engine.range} miles`);
@@ -372,6 +372,7 @@ if (status.engine.charging) {
 ### Refresh vs Cached Status
 
 **Cached Status** (`refresh: false`):
+
 - Uses server's cached data
 - Fast response (< 2 seconds)
 - Doesn't wake up vehicle
@@ -380,6 +381,7 @@ if (status.engine.charging) {
 - **Recommended for monitoring**
 
 **Fresh Status** (`refresh: true`):
+
 - Polls vehicle directly
 - Slow response (30-60 seconds)
 - Drains 12V battery if used too often
@@ -390,6 +392,7 @@ if (status.engine.charging) {
 ### Regional Differences
 
 Some features are region-specific:
+
 - **Trip Info / Drive History**: Primarily EU region
 - **Monthly Reports**: EU region
 - **Charge Targets**: EV vehicles only

@@ -53,7 +53,7 @@ export default class ChineseVehicle extends Vehicle {
   }
 
   /**
-   * 
+   *
    * @param config - Vehicle start configuration for the request
    * @returns Promise<string>
    * @remarks - not sure if this supports starting ICE vehicles
@@ -159,7 +159,6 @@ export default class ChineseVehicle extends Vehicle {
     const http = await this.controller.getVehicleHttpService();
 
     try {
-      
       const cachedResponse = this.updateRates(
         await http.get(`/api/v2/spa/vehicles/${this.vehicleConfig.id}/status/latest`)
       );
@@ -184,7 +183,7 @@ export default class ChineseVehicle extends Vehicle {
       throw manageBluelinkyError(err, 'ChinaVehicle.fullStatus');
     }
   }
-  
+
   public async status(
     input: VehicleStatusOptions
   ): Promise<VehicleStatus | RawVehicleStatus | null> {
@@ -203,7 +202,7 @@ export default class ChineseVehicle extends Vehicle {
       );
 
       // handles refreshing data
-      const vehicleStatus =response.body.resMsg.status;
+      const vehicleStatus = response.body.resMsg.status;
 
       const parsedStatus: VehicleStatus = {
         chassis: {

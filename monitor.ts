@@ -82,7 +82,13 @@ function loadState(): AlertState {
       const raw = JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
       // Back-fill tpmsAlertSent for state files written before this feature
       if (!raw.tpmsAlertSent) {
-        raw.tpmsAlertSent = { frontLeft: false, frontRight: false, rearLeft: false, rearRight: false, allLamps: false };
+        raw.tpmsAlertSent = {
+          frontLeft: false,
+          frontRight: false,
+          rearLeft: false,
+          rearRight: false,
+          allLamps: false,
+        };
       }
       // Back-fill allLamps field for state files missing it
       if (raw.tpmsAlertSent.allLamps === undefined) {
@@ -98,7 +104,13 @@ function loadState(): AlertState {
     alert15Sent: false,
     lastRange: 0,
     lastCheck: new Date().toISOString(),
-    tpmsAlertSent: { frontLeft: false, frontRight: false, rearLeft: false, rearRight: false, allLamps: false },
+    tpmsAlertSent: {
+      frontLeft: false,
+      frontRight: false,
+      rearLeft: false,
+      rearRight: false,
+      allLamps: false,
+    },
   };
 }
 
@@ -129,7 +141,7 @@ async function monitor(): Promise<void> {
 
   const client = new BlueLinky({ username, password, brand, region, pin });
 
-  client.on('ready', async (vehicles) => {
+  client.on('ready', async vehicles => {
     try {
       const vehicle = vehicles[0];
       const state = loadState();
@@ -181,7 +193,9 @@ async function monitor(): Promise<void> {
       console.log(`Current Range: ${currentRange} miles`);
       console.log(`Previous Range: ${state.lastRange} miles`);
       console.log(`Temperature: ${tempF !== null ? `${tempF}°F` : 'unavailable'}`);
-      console.log(`TPMS: FL=${tpmsLamps.frontLeft} FR=${tpmsLamps.frontRight} RL=${tpmsLamps.rearLeft} RR=${tpmsLamps.rearRight} ALL=${tpmsLamps.all}\n`);
+      console.log(
+        `TPMS: FL=${tpmsLamps.frontLeft} FR=${tpmsLamps.frontRight} RL=${tpmsLamps.rearLeft} RR=${tpmsLamps.rearRight} ALL=${tpmsLamps.all}\n`
+      );
 
       // ── Fill-up detection ──────────────────────────────────────────────────
       const isFillup = state.lastRange > 0 && currentRange > state.lastRange + FILLUP_THRESHOLD;
@@ -241,10 +255,18 @@ async function monitor(): Promise<void> {
           timestamp: new Date(),
         });
         state.alert15Sent = true;
-        db.insertAlert({ ts, alert_type: 'fuel_critical', details: JSON.stringify({ range: currentRange }) });
+        db.insertAlert({
+          ts,
+          alert_type: 'fuel_critical',
+          details: JSON.stringify({ range: currentRange }),
+        });
       }
 
-      if (currentRange <= FUEL_THRESHOLD_LOW && currentRange > FUEL_THRESHOLD_CRITICAL && !state.alert50Sent) {
+      if (
+        currentRange <= FUEL_THRESHOLD_LOW &&
+        currentRange > FUEL_THRESHOLD_CRITICAL &&
+        !state.alert50Sent
+      ) {
         await alertBackend.sendAlert({
           kind: 'fuel',
           severity: 'low',
@@ -253,11 +275,23 @@ async function monitor(): Promise<void> {
           timestamp: new Date(),
         });
         state.alert50Sent = true;
-        db.insertAlert({ ts, alert_type: 'fuel_low', details: JSON.stringify({ range: currentRange }) });
+        db.insertAlert({
+          ts,
+          alert_type: 'fuel_low',
+          details: JSON.stringify({ range: currentRange }),
+        });
       }
 
       if (isFillup) {
-        db.insertAlert({ ts, alert_type: 'fillup', details: JSON.stringify({ range: currentRange, prev_range: state.lastRange, odometer_mi: odometerMi }) });
+        db.insertAlert({
+          ts,
+          alert_type: 'fillup',
+          details: JSON.stringify({
+            range: currentRange,
+            prev_range: state.lastRange,
+            odometer_mi: odometerMi,
+          }),
+        });
       }
 
       // ── TPMS alerts ────────────────────────────────────────────────────────
@@ -281,12 +315,19 @@ async function monitor(): Promise<void> {
             state.tpmsAlertSent[w as 'frontLeft' | 'frontRight' | 'rearLeft' | 'rearRight'] = true;
           }
         }
-        db.insertAlert({ ts, alert_type: severity === 'critical' ? 'tpms_critical' : 'tpms_warn', details: JSON.stringify({ wheels: newWheels }) });
+        db.insertAlert({
+          ts,
+          alert_type: severity === 'critical' ? 'tpms_critical' : 'tpms_warn',
+          details: JSON.stringify({ wheels: newWheels }),
+        });
       }
 
       // Clear TPMS dedup for any wheels/flags that are now off
       const wheels: Array<'frontLeft' | 'frontRight' | 'rearLeft' | 'rearRight'> = [
-        'frontLeft', 'frontRight', 'rearLeft', 'rearRight',
+        'frontLeft',
+        'frontRight',
+        'rearLeft',
+        'rearRight',
       ];
       for (const w of wheels) {
         if (!tpmsLamps[w]) {
@@ -320,7 +361,7 @@ async function monitor(): Promise<void> {
     }
   });
 
-  client.on('error', (err) => {
+  client.on('error', err => {
     console.error('❌ Login error:', err);
     process.exit(1);
   });

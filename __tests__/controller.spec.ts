@@ -23,7 +23,7 @@ const getController = region => {
     pin: '1234',
     vin: '4444444444444',
     vehicleId: undefined,
-    stampMode: 'LOCAL'
+    stampMode: 'LOCAL',
   });
 
   return controller;

@@ -30,9 +30,7 @@ export interface AlertBackend {
 
 /** Format a wheel list like ['frontLeft', 'rearRight'] → "front-left, rear-right" */
 function formatWheels(wheels: string[]): string {
-  return wheels
-    .map(w => w.replace(/([A-Z])/g, '-$1').toLowerCase())
-    .join(', ');
+  return wheels.map(w => w.replace(/([A-Z])/g, '-$1').toLowerCase()).join(', ');
 }
 
 /**

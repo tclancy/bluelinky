@@ -8,8 +8,8 @@ __tests__/
 babel.config.js
 debug.ts
 jest.config.js
-rollup.config.js                                                 
-tsconfig.json  
-.editorconfig                                                    
-.eslintrc.js                                                     
-.prettierrc  
+rollup.config.js
+tsconfig.json
+.editorconfig
+.eslintrc.js
+.prettierrc

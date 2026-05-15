@@ -1,6 +1,6 @@
 import got from 'got';
 import { CookieJar } from 'tough-cookie';
-import {ChineseBrandEnvironment } from '../../constants/china';
+import { ChineseBrandEnvironment } from '../../constants/china';
 
 export type Code = string;
 

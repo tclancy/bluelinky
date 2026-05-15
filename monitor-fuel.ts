@@ -83,15 +83,15 @@ async function monitorFuel() {
     pin,
   });
 
-  client.on('ready', async (vehicles) => {
+  client.on('ready', async vehicles => {
     try {
       const vehicle = vehicles[0];
       const state = loadState();
 
       // Get current fuel status
       const status = await vehicle.status({
-        refresh: false,  // Use cached status
-        parsed: true
+        refresh: false, // Use cached status
+        parsed: true,
       });
 
       if (!status) {
@@ -149,7 +149,11 @@ async function monitorFuel() {
       }
 
       // LOGIC: Check 50-mile low threshold
-      if (currentRange <= THRESHOLD_LOW && currentRange > THRESHOLD_CRITICAL && !state.alert50Sent) {
+      if (
+        currentRange <= THRESHOLD_LOW &&
+        currentRange > THRESHOLD_CRITICAL &&
+        !state.alert50Sent
+      ) {
         await alertBackend.sendAlert({
           severity: 'low',
           range: currentRange,
@@ -177,7 +181,7 @@ async function monitorFuel() {
     }
   });
 
-  client.on('error', (err) => {
+  client.on('error', err => {
     console.error('❌ Login error:', err);
     process.exit(1);
   });
