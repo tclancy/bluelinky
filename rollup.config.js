@@ -6,7 +6,6 @@ import terser from '@rollup/plugin-terser';
 // import pkg from './package.json';
 const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
 
-
 export default {
   input: 'src/index.ts',
   output: [
@@ -26,10 +25,5 @@ export default {
     },
   ],
   external: [...Object.keys(pkg.dependencies || {}), 'events', 'url', 'fs', 'util'],
-  plugins: [
-    resolve({ preferBuiltins: true }),
-    typescript({}),
-    commonjs(),
-    terser(),
-  ],
+  plugins: [resolve({ preferBuiltins: true }), typescript({}), commonjs(), terser()],
 };

@@ -5,6 +5,7 @@ This deployment uses Docker to create a completely self-contained fuel monitorin
 ## Prerequisites
 
 On your Linux server, you only need:
+
 - Docker
 - docker-compose (optional, but recommended)
 
@@ -22,26 +23,31 @@ That's it! Everything else (Node.js, npm packages, cron) runs inside the contain
 ### Quick Reference Commands
 
 **View logs:**
+
 ```bash
 ssh plexclaude "docker logs -f bluelinky-fuel-monitor"
 ```
 
 **View cron execution logs:**
+
 ```bash
 ssh plexclaude "docker exec bluelinky-fuel-monitor cat /var/log/fuel-monitor/cron.log"
 ```
 
 **Manual test run:**
+
 ```bash
 ssh plexclaude "docker exec bluelinky-fuel-monitor sh -c 'cd /app && export \$(grep -v \"^#\" .env | xargs) && npx tsx monitor-fuel.ts'"
 ```
 
 **Restart container:**
+
 ```bash
 ssh plexclaude "cd ~/fuelbot/deployment && docker compose restart"
 ```
 
 **Rebuild and restart:**
+
 ```bash
 ssh plexclaude "cd ~/fuelbot/deployment && docker compose down && docker compose up -d --build"
 ```
@@ -291,12 +297,14 @@ AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
 By default, AWS SNS starts in sandbox mode and can only send to verified phone numbers.
 
 **To verify a number in sandbox mode:**
+
 1. Go to SNS Console: https://console.aws.amazon.com/sns/
 2. Click "Text messaging (SMS)" → "Sandbox destination phone numbers"
 3. Click "Add phone number"
 4. Enter your phone number and verify it
 
 **To send to ANY number (production mode):**
+
 1. In SNS Console, go to "Text messaging (SMS)" → "Account information"
 2. Click "Exit sandbox"
 3. Fill out the request form (usually approved in 24 hours)
@@ -315,11 +323,13 @@ Compare to T-Mobile email gateway: Free but unreliable (may be blocked by carrie
 ### Container won't start
 
 Check logs:
+
 ```bash
 docker logs bluelinky-fuel-monitor
 ```
 
 Common issues:
+
 - Missing .env file
 - Invalid credentials in .env
 - Bluelink API is down
@@ -327,11 +337,13 @@ Common issues:
 ### No alerts being sent
 
 1. Check if monitoring is running:
+
    ```bash
    docker exec bluelinky-fuel-monitor cat /var/log/fuel-monitor/cron.log
    ```
 
 2. Check alert state:
+
    ```bash
    docker exec bluelinky-fuel-monitor cat /app/.fuel-alert-state.json
    ```
@@ -360,12 +372,14 @@ docker exec bluelinky-fuel-monitor /bin/bash -c 'echo "{\"alert50Sent\":false,\"
 ## System Requirements
 
 **Host system needs:**
+
 - Docker Engine 20.10+
 - docker-compose 1.29+ (optional)
 - ~500MB disk space for container and images
 - Internet connection for Bluelink API and Twilio API
 
 **The container provides:**
+
 - Node.js 20
 - All npm dependencies
 - cron daemon

@@ -13,15 +13,9 @@
     "emitDecoratorMetadata": true,
     "declarationDir": "dist-types",
     "outDir": "dist",
-    "lib": [ "es2015" ],
-    "typeRoots": [
-      "node_modules/@types"
-    ]
+    "lib": ["es2015"],
+    "typeRoots": ["node_modules/@types"]
   },
-  "include": [
-    "src"
-  ],
-  "exclude": [
-    "node_modules"
-  ]
+  "include": ["src"],
+  "exclude": ["node_modules"]
 }
