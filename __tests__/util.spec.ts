@@ -9,7 +9,7 @@ describe('Utility', () => {
     expect(tempCodeToCelsius(REGIONS.CA, '18H')).toEqual(28);
     expect(tempCodeToCelsius(REGIONS.CA, '20H')).toEqual(32);
   });
-  
+
   it('converts celsius to temp code in CA', () => {
     expect(celciusToTempCode(REGIONS.CA, 18)).toEqual('04H');
     expect(celciusToTempCode(REGIONS.CA, 21.5)).toEqual('0BH');

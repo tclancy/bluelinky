@@ -12,7 +12,7 @@ import {
   RawVehicleStatus,
   VehicleStatusOptions,
   FullVehicleStatus,
-  SeatHeaterVentInfo
+  SeatHeaterVentInfo,
 } from '../interfaces/common.interfaces';
 import { RequestHeaders } from '../interfaces/american.interfaces';
 
@@ -106,15 +106,15 @@ export default class AmericanVehicle extends Vehicle {
     let seatClimateOptions: SeatHeaterVentInfo = null;
     let gen2ev = false;
     const mergedConfig = {
-      ...{
+      ...({
         hvac: false,
         duration: 10,
         temperature: 70,
         defrost: false,
         heatedFeatures: 0,
         unit: 'F',
-        seatClimateSettings: seatClimateOptions
-      } as VehicleStartOptions,
+        seatClimateSettings: seatClimateOptions,
+      } as VehicleStartOptions),
       ...startConfig,
     };
 
@@ -135,10 +135,13 @@ export default class AmericanVehicle extends Vehicle {
     //keeping heate dFeatures backwards compatible
     if (typeof mergedConfig.heatedFeatures === 'boolean') {
       mergedConfig.heatedFeatures = mergedConfig.heatedFeatures ? 1 : 0;
-      logger.warn('heatedFeatures was boolean; is actually enum; please update code to use enum values');
+      logger.warn(
+        'heatedFeatures was boolean; is actually enum; please update code to use enum values'
+      );
     } else if (typeof mergedConfig.heatedFeatures === 'number') {
       if (advClimateOptionValidator.validHeats.includes(mergedConfig.heatedFeatures)) {
-        mergedConfig.heatedFeatures = advClimateOptionValidator.validHeats[mergedConfig.heatedFeatures];
+        mergedConfig.heatedFeatures =
+          advClimateOptionValidator.validHeats[mergedConfig.heatedFeatures];
       } else {
         logger.warn('heatedFeatures is not a valid enum, defaulting to 0');
         mergedConfig.heatedFeatures = 0; // default to 0 if not valid
@@ -153,10 +156,18 @@ export default class AmericanVehicle extends Vehicle {
     if (mergedConfig.seatClimateSettings && !gen2ev) {
       const controlled_seats = Object.keys(mergedConfig.seatClimateSettings);
       if (controlled_seats.length > 0) {
-        logger.debug(`Seat climate settings found: ${JSON.stringify(mergedConfig.seatClimateSettings)}`);
-        controlled_seats.forEach((seat) => {
-          const targetSeat = advClimateOptionValidator.validSeats[seat] ? advClimateOptionValidator.validSeats[seat] : null;
-          const seatStatus = advClimateOptionValidator.validStatus.includes(mergedConfig.seatClimateSettings![seat]) ? mergedConfig.seatClimateSettings![seat] : null;
+        logger.debug(
+          `Seat climate settings found: ${JSON.stringify(mergedConfig.seatClimateSettings)}`
+        );
+        controlled_seats.forEach(seat => {
+          const targetSeat = advClimateOptionValidator.validSeats[seat]
+            ? advClimateOptionValidator.validSeats[seat]
+            : null;
+          const seatStatus = advClimateOptionValidator.validStatus.includes(
+            mergedConfig.seatClimateSettings![seat]
+          )
+            ? mergedConfig.seatClimateSettings![seat]
+            : null;
           if (targetSeat && seatStatus) {
             result![targetSeat] = seatStatus;
           } else {
@@ -171,10 +182,10 @@ export default class AmericanVehicle extends Vehicle {
       logger.debug('no seatClimateSettings found / gen 2 ev');
     }
     // if after processing result is empty, default seatClimateOptions to null
-    Object.keys(result!).length > 0 ? seatClimateOptions = result : seatClimateOptions = null;
+    Object.keys(result!).length > 0 ? (seatClimateOptions = result) : (seatClimateOptions = null);
     logger.debug(`Processed seatClimateOptions: ${JSON.stringify(seatClimateOptions)}`);
 
-    // using ... spread syntax to conditionally build body at the end 
+    // using ... spread syntax to conditionally build body at the end
     // avoids typescript's *ahem* nuances with changing things conditionally
     const body = {
       'Ims': 0,
@@ -185,9 +196,10 @@ export default class AmericanVehicle extends Vehicle {
       },
       'defrost': mergedConfig.defrost,
       'heating1': mergedConfig.heatedFeatures, // default to Off if not valid
-      ...(!gen2ev && { //gen2ev does not support duration or seatClimateOptions
+      ...(!gen2ev && {
+        //gen2ev does not support duration or seatClimateOptions
         'igniOnDuration': mergedConfig.duration,
-        'seatHeaterVentInfo': seatClimateOptions,  // figured out what it is
+        'seatHeaterVentInfo': seatClimateOptions, // figured out what it is
       }),
       'username': this.userConfig.username,
       'vin': this.vehicleConfig.vin,

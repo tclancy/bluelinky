@@ -1,7 +1,4 @@
-import {
-  getBrandEnvironment,
-  ChineseBrandEnvironment,
-} from '../constants/china';
+import { getBrandEnvironment, ChineseBrandEnvironment } from '../constants/china';
 import { BlueLinkyConfig, Session } from '../interfaces/common.interfaces';
 import got, { GotInstance, GotJSONFn } from 'got';
 import { Vehicle } from '../vehicles/vehicle';
@@ -46,7 +43,7 @@ export class ChineseController extends SessionController<ChineseBlueLinkConfig> 
   public get environment(): ChineseBrandEnvironment {
     return this._environment;
   }
-ß;
+  ß;
   public session: Session = {
     accessToken: undefined,
     refreshToken: undefined,
@@ -153,7 +150,7 @@ export class ChineseController extends SessionController<ChineseBlueLinkConfig> 
       } catch (e) {
         logger.error(
           `@ChinaController.login: sign in with ${
-          this.authStrategies.main.name
+            this.authStrategies.main.name
           } failed with error ${(e as Stringifiable).toString()}`
         );
         logger.debug(
@@ -180,7 +177,7 @@ export class ChineseController extends SessionController<ChineseBlueLinkConfig> 
             'ccsp-application-id': this.environment.appId,
           },
           body: {
-            pushRegId: this.environment.pushRegId, //59af09e554a9442ab8589c9500d04d2e 
+            pushRegId: this.environment.pushRegId, //59af09e554a9442ab8589c9500d04d2e
             providerDeviceId: this.environment.providerDeviceId,
             pushType: 'GCM',
             uuid: uuidV4(),
@@ -224,7 +221,9 @@ export class ChineseController extends SessionController<ChineseBlueLinkConfig> 
         this.session.tokenExpiresAt = Math.floor(Date.now() / 1000 + responseBody.expires_in);
       }
       logger.debug('@ChinaController.login: Session defined properly');
-      logger.debug(`accessToken is ${this.session.accessToken}\n refreshToken is ${this.session.refreshToken}\n tokenExpiresAt : ${this.session.tokenExpiresAt}`);
+      logger.debug(
+        `accessToken is ${this.session.accessToken}\n refreshToken is ${this.session.refreshToken}\n tokenExpiresAt : ${this.session.tokenExpiresAt}`
+      );
       return 'Login success';
     } catch (err) {
       throw manageBluelinkyError(err, 'ChinaController.login');
@@ -303,7 +302,7 @@ export class ChineseController extends SessionController<ChineseBlueLinkConfig> 
         ...this.defaultHeaders,
         'Authorization': this.session.controlToken,
         'AuthorizationCCSP': this.session.controlToken,
-        'ccsp-device-id': '2e062595-28e0-4bcb-a75a-1b395cde337c', 
+        'ccsp-device-id': '2e062595-28e0-4bcb-a75a-1b395cde337c',
       },
       json: true,
     });
@@ -324,11 +323,10 @@ export class ChineseController extends SessionController<ChineseBlueLinkConfig> 
       'Authorization': this.session.accessToken,
       'offset': (new Date().getTimezoneOffset() / 60).toFixed(0), //fix service 503 error.
       //'ccsp-device-id': this.session.deviceId,
-      'ccsp-device-id': '2e062595-28e0-4bcb-a75a-1b395cde337c', 
+      'ccsp-device-id': '2e062595-28e0-4bcb-a75a-1b395cde337c',
       'ccsp-application-id': this.environment.appId,
       'Content-Type': 'application/json',
       'User-Agent': 'okhttp/4.4.0',
     };
   }
-
 }

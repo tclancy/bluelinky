@@ -7,7 +7,13 @@ function tmpDb(): { db: VehicleDb; cleanup: () => void } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bluelinky-test-'));
   const dbPath = path.join(dir, 'test.db');
   const db = new VehicleDb(dbPath);
-  return { db, cleanup: () => { db.close(); fs.rmSync(dir, { recursive: true }); } };
+  return {
+    db,
+    cleanup: () => {
+      db.close();
+      fs.rmSync(dir, { recursive: true });
+    },
+  };
 }
 
 describe('VehicleDb', () => {

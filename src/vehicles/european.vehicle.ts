@@ -53,7 +53,7 @@ export default class EuropeanVehicle extends Vehicle {
   }
 
   /**
-   * 
+   *
    * @param config - Vehicle start configuration for the request
    * @returns Promise<string>
    * @remarks - not sure if this supports starting ICE vehicles
@@ -162,15 +162,12 @@ export default class EuropeanVehicle extends Vehicle {
       let fullStatus;
 
       if (this.vehicleConfig.ccuCCS2ProtocolSupport) {
-
         const cachedResponse = this.updateRates(
           await http.get(`/api/v2/spa/vehicles/${this.vehicleConfig.id}/ccs2/carstatus/latest`)
         );
 
         fullStatus = cachedResponse.body.resMsg.state.Vehicle;
-
       } else {
-
         const cachedResponse = this.updateRates(
           await http.get(`/api/v2/spa/vehicles/${this.vehicleConfig.id}/status/latest`)
         );
@@ -188,7 +185,6 @@ export default class EuropeanVehicle extends Vehicle {
           );
           fullStatus.vehicleLocation = locationResponse.body.resMsg.gpsDetail;
         }
-
       }
 
       this._fullStatus = fullStatus;
@@ -209,18 +205,16 @@ export default class EuropeanVehicle extends Vehicle {
     const http = await this.controller.getVehicleHttpService();
 
     try {
-
       let vehicleStatus, parsedStatus: VehicleStatus;
 
       if (this.vehicleConfig.ccuCCS2ProtocolSupport) {
-
         vehicleStatus = await this.fullStatus(input);
 
         const locks = [
           !!vehicleStatus?.Cabin?.Door?.Row1?.Passenger?.Lock,
           !!vehicleStatus?.Cabin?.Door?.Row1?.Driver?.Lock,
           !!vehicleStatus?.Cabin?.Door?.Row2?.Left?.Lock,
-          !!vehicleStatus?.Cabin?.Door?.Row2?.Right?.Lock
+          !!vehicleStatus?.Cabin?.Door?.Row2?.Right?.Lock,
         ];
 
         let plugedTo: EVPlugTypes;
@@ -261,7 +255,9 @@ export default class EuropeanVehicle extends Vehicle {
             temperatureUnit: 0,
           },
           engine: {
-            ignition: !!vehicleStatus?.Electronics?.PowerSupply?.Ignition1 || !!vehicleStatus?.Electronics?.PowerSupply?.Ignition3,
+            ignition:
+              !!vehicleStatus?.Electronics?.PowerSupply?.Ignition1 ||
+              !!vehicleStatus?.Electronics?.PowerSupply?.Ignition3,
             accessory: !!vehicleStatus?.Electronics?.PowerSupply?.Accessory,
             rangeGas: undefined,
             // EV
@@ -269,18 +265,20 @@ export default class EuropeanVehicle extends Vehicle {
             rangeEV: undefined,
             plugedTo: plugedTo,
             charging: undefined,
-            estimatedCurrentChargeDuration: vehicleStatus?.Green?.ChargingInformation?.Charging?.RemainTime,
-            estimatedFastChargeDuration: vehicleStatus?.Green?.ChargingInformation?.EstimatedTime?.Quick,
-            estimatedPortableChargeDuration: vehicleStatus?.Green?.ChargingInformation?.EstimatedTime?.ICCB,
-            estimatedStationChargeDuration: vehicleStatus?.Green?.ChargingInformation?.EstimatedTime?.Standard,
+            estimatedCurrentChargeDuration:
+              vehicleStatus?.Green?.ChargingInformation?.Charging?.RemainTime,
+            estimatedFastChargeDuration:
+              vehicleStatus?.Green?.ChargingInformation?.EstimatedTime?.Quick,
+            estimatedPortableChargeDuration:
+              vehicleStatus?.Green?.ChargingInformation?.EstimatedTime?.ICCB,
+            estimatedStationChargeDuration:
+              vehicleStatus?.Green?.ChargingInformation?.EstimatedTime?.Standard,
             batteryCharge12v: vehicleStatus?.Electronics?.Battery?.Level,
             batteryChargeHV: vehicleStatus?.Green?.BatteryManagement?.BatteryRemain?.Ratio,
           },
           lastupdate: vehicleStatus?.Date ? parseDate(vehicleStatus?.Date) : null,
         };
-
       } else {
-
         const cacheString = statusConfig.refresh ? '' : '/latest';
 
         const response = this.updateRates(
@@ -366,9 +364,7 @@ export default class EuropeanVehicle extends Vehicle {
         );
         this._odometer = response.body.resMsg.state.Vehicle.Drivetrain.Odometer;
         return this._odometer;
-        
       } else {
-
         const response = this.updateRates(
           await http.get(`/api/v2/spa/vehicles/${this.vehicleConfig.id}/status/latest`)
         );

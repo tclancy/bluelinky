@@ -112,9 +112,9 @@ async function performCommand(command) {
         break;
       case 'vehicles':
         const vehicles = await client.getVehicles();
-         const response = vehicles.map(v => {
+        const response = vehicles.map(v => {
           const { name, vin, nickname, regDate, generation } = v.vehicleConfig;
-          return { name, vin, nickname, regDate, generation};
+          return { name, vin, nickname, regDate, generation };
         });
         console.log('vehicles', JSON.stringify(response, null, 2));
         break;

@@ -1,6 +1,6 @@
 import got from 'got';
 import crypto from 'node:crypto';
-import { fetch, Agent } from  'undici';
+import { fetch, Agent } from 'undici';
 import { BlueLinkyConfig } from '../interfaces/common.interfaces';
 import { CanadianBrandEnvironment, getBrandEnvironment } from '../constants/canada';
 import { Vehicle } from '../vehicles/vehicle';
@@ -113,7 +113,7 @@ export class CanadianController extends SessionController<CanadianBlueLinkyConfi
   /* eslint-disable @typescript-eslint/no-explicit-any */
   private async request(endpoint, body: any, headers: any = {}): Promise<any | null> {
     logger.debug(`[${endpoint}] ${JSON.stringify(headers)} ${JSON.stringify(body)}`);
-    const [major,,] = process.versions.node.split('.').map(Number);
+    const [major, ,] = process.versions.node.split('.').map(Number);
     if (major >= 21) {
       process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
       logger.debug('Node version >= 21, using fetch instead of got');
@@ -133,8 +133,8 @@ export class CanadianController extends SessionController<CanadianBlueLinkyConfi
         dispatcher: new Agent({
           connect: {
             rejectUnauthorized: false,
-            secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT
-          }
+            secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT,
+          },
         }),
       };
       try {

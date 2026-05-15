@@ -1,6 +1,6 @@
 import got from 'got';
 import crypto from 'node:crypto';
-import { fetch, Agent } from  'undici';
+import { fetch, Agent } from 'undici';
 import logger from '../logger';
 
 import {
@@ -27,7 +27,6 @@ import { Vehicle } from './vehicle';
 import { celciusToTempCode, parseDate } from '../util';
 import { CanadianController } from '../controllers/canadian.controller';
 import { ManagedBluelinkyError } from '../tools/common.tools';
-
 
 export interface CanadianInfo {
   vehicle: VehicleInfo;
@@ -374,11 +373,11 @@ export default class CanadianVehicle extends Vehicle {
     // add logic for token refresh to ensure we don't use a stale token
     await this.controller.refreshAccessToken();
 
-    const [major,,] = process.versions.node.split('.').map(Number);
+    const [major, ,] = process.versions.node.split('.').map(Number);
     if (major >= 21) {
       body = {
         pin: this.userConfig.pin,
-        ...body
+        ...body,
       };
       process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
       logger.debug('Node version >= 21, using fetch instead of got');
@@ -399,8 +398,8 @@ export default class CanadianVehicle extends Vehicle {
         dispatcher: new Agent({
           connect: {
             rejectUnauthorized: false,
-            secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT
-          }
+            secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT,
+          },
         }),
       };
       try {

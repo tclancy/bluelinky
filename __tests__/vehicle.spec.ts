@@ -160,9 +160,12 @@ describe('CanadianVehicle', () => {
     expect(result).toEqual('Token refreshed');
     // should update access token
     expect(vehicle.controller.session.accessToken).toEqual('JEST_TOKEN');
-    expect(vehicle.controller.session.tokenExpiresAt).toBeGreaterThan(Math.floor(Date.now() / 1000));
-    expect(vehicle.controller.session.tokenExpiresAt).toBeLessThan(Math.floor(Date.now() / 1000 + 20));
-
+    expect(vehicle.controller.session.tokenExpiresAt).toBeGreaterThan(
+      Math.floor(Date.now() / 1000)
+    );
+    expect(vehicle.controller.session.tokenExpiresAt).toBeLessThan(
+      Math.floor(Date.now() / 1000 + 20)
+    );
   });
 
   it('call lock commmand', async () => {
@@ -266,7 +269,7 @@ describe('CanadianVehicle', () => {
       body: {
         responseHeader: {
           responseCode: 1,
-          responseDesc: 'failed'
+          responseDesc: 'failed',
         },
       },
       statusCode: 200,
@@ -365,7 +368,7 @@ describe('EuropeanVehicle', () => {
   //   });
 
   //   gotMock.mockClear();
-    
+
   //   await vehicle.checkControlToken();
 
   //   // should update control token

@@ -34,7 +34,7 @@ interface EuropeanVehicleDescription {
   vehicleName: string;
   regDate: string;
   vehicleId: string;
-  ccuCCS2ProtocolSupport: number
+  ccuCCS2ProtocolSupport: number;
 }
 
 export class EuropeanController extends SessionController<EuropeBlueLinkyConfig> {
@@ -215,14 +215,18 @@ export class EuropeanController extends SessionController<EuropeBlueLinkyConfig>
       logger.debug('@EuropeController.login: Device registered');
 
       // Updated token exchange to use new endpoint based on Python fix
-      const tokenUrl = this.environment.brand === 'kia' 
-        ? 'https://idpconnect-eu.kia.com/auth/api/v2/user/oauth2/token'
-        : 'https://idpconnect-eu.hyundai.com/auth/api/v2/user/oauth2/token';
+      const tokenUrl =
+        this.environment.brand === 'kia'
+          ? 'https://idpconnect-eu.kia.com/auth/api/v2/user/oauth2/token'
+          : 'https://idpconnect-eu.hyundai.com/auth/api/v2/user/oauth2/token';
 
       const tokenFormData = new URLSearchParams();
       tokenFormData.append('grant_type', 'authorization_code');
       tokenFormData.append('code', authResult.code);
-      tokenFormData.append('redirect_uri', `${this.environment.baseUrl}/api/v1/user/oauth2/redirect`);
+      tokenFormData.append(
+        'redirect_uri',
+        `${this.environment.baseUrl}/api/v1/user/oauth2/redirect`
+      );
       tokenFormData.append('client_id', this.environment.clientId);
       tokenFormData.append('client_secret', 'secret');
 
@@ -299,7 +303,7 @@ export class EuropeanController extends SessionController<EuropeBlueLinkyConfig>
             id: v.vehicleId,
             vin: vehicleProfile.vinInfo[0].basic.vin,
             generation: vehicleProfile.vinInfo[0].basic.modelYear,
-            ccuCCS2ProtocolSupport: !!v.ccuCCS2ProtocolSupport
+            ccuCCS2ProtocolSupport: !!v.ccuCCS2ProtocolSupport,
           } as VehicleRegisterOptions;
 
           logger.debug(`@EuropeController.getVehicles: Added vehicle ${vehicleConfig.id}`);
