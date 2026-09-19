@@ -1,3 +1,16 @@
+# pre-commit's `default_stages` defaults to EVERY stage, so every hook below is
+# already declared as a pre-push hook. But `default_install_hook_types` defaults
+# to `pre-commit` ALONE, so `pre-commit install` arms only the commit path and
+# the declared pre-push battery never runs. Declaring both is the half that
+# survives a fresh clone; running `pre-commit install` is the half that is local
+# machine state, and it must be re-run by anyone who installed before this line
+# existed. See #12.
+#
+# The pre-push battery is every hook below, so do not add `default_stages` or a
+# per-hook `stages:` that excludes `pre-push` without meaning it — a test fails
+# if you do.
+default_install_hook_types: [pre-commit, pre-push]
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0

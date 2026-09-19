@@ -105,6 +105,19 @@ Run an install for all the dependencies, `npm install`
 
 Now you can invoke the debug.ts script with `npm run debug`
 
+### Git hooks
+
+This repo uses [pre-commit](https://pre-commit.com) for lint/format checks at
+both commit and push time. The hook types are declared in
+`.pre-commit-config.yaml`, but installing them is local machine state:
+
+```
+pre-commit install
+```
+
+Re-run it even if you have installed before — the push hook was only declared
+in #12, and `pre-commit install` does not add hook types retroactively.
+
 ## Documentation
 
 Checkout out the [docs](https://bluelinky.readme.io) for more info.
