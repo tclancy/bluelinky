@@ -2,7 +2,7 @@
  * Tests for the pure logic helpers in src/monitor-helpers.ts.
  * These are stateless functions that can be tested without a Bluelink API.
  */
-import { newlyLitWheels, tpmsSeverity } from '../src/monitor-helpers';
+import { carReportedAt, checkRowFrom, newlyLitWheels, tpmsSeverity } from '../src/monitor-helpers';
 
 describe('newlyLitWheels', () => {
   it('returns all four wheels plus allLamps when all flags transition off→on simultaneously', () => {
@@ -198,5 +198,84 @@ describe('tpmsSeverity', () => {
 
   it('returns warn for two wheels', () => {
     expect(tpmsSeverity(['frontLeft', 'rearRight'], false)).toBe('warn');
+  });
+});
+
+describe('carReportedAt', () => {
+  it('normalises a Date to an ISO string', () => {
+    expect(carReportedAt(new Date('2026-09-19T11:04:00.000Z'))).toBe('2026-09-19T11:04:00.000Z');
+  });
+
+  it('accepts an ISO string, because the vendor parser is reached through a cast', () => {
+    expect(carReportedAt('2026-09-19T11:04:00.000Z')).toBe('2026-09-19T11:04:00.000Z');
+  });
+
+  it('returns null for null and undefined', () => {
+    expect(carReportedAt(null)).toBeNull();
+    expect(carReportedAt(undefined)).toBeNull();
+  });
+
+  it('returns null for an empty or blank string', () => {
+    expect(carReportedAt('')).toBeNull();
+    expect(carReportedAt('   ')).toBeNull();
+  });
+
+  it('returns null for an Invalid Date rather than throwing', () => {
+    // `new Date('nonsense')` IS a Date, so an instanceof guard passes it
+    // through, and `.toISOString()` on it throws a RangeError -- which would
+    // abort the entire monitoring run over its least important field.
+    const invalid = new Date('nonsense');
+    expect(invalid instanceof Date).toBe(true);
+    expect(() => invalid.toISOString()).toThrow();
+    expect(carReportedAt(invalid)).toBeNull();
+    expect(carReportedAt('nonsense')).toBeNull();
+  });
+
+  it('returns null for a shape that is neither a Date nor a string', () => {
+    expect(carReportedAt(1758279840000)).toBeNull();
+    expect(carReportedAt({ when: 'yesterday' })).toBeNull();
+  });
+});
+
+describe('checkRowFrom', () => {
+  // `ts` and `lastupdate` are deliberately three days apart. A fixture where
+  // they coincide cannot tell the correct mapping from `car_reported_at: ts`,
+  // which is the mistake this function exists to make unmakeable.
+  const run = {
+    ts: '2026-09-22T18:00:09.885Z',
+    vehicleName: '2020 SANTA FE',
+    rangeMi: 88,
+    tempF: 63.7,
+    isFillup: false,
+    odometerMi: null,
+    lastupdate: new Date('2026-09-19T11:04:00.000Z'),
+  };
+
+  it('maps the car report time from lastupdate, not from ts', () => {
+    const row = checkRowFrom(run);
+    expect(row.car_reported_at).toBe('2026-09-19T11:04:00.000Z');
+    expect(row.ts).toBe('2026-09-22T18:00:09.885Z');
+    expect(row.car_reported_at).not.toBe(row.ts);
+  });
+
+  it('carries the rest of the run through unchanged', () => {
+    expect(checkRowFrom(run)).toEqual({
+      ts: '2026-09-22T18:00:09.885Z',
+      vehicle_name: '2020 SANTA FE',
+      range_mi: 88,
+      temp_f: 63.7,
+      is_fillup: 0,
+      odometer_mi: null,
+      car_reported_at: '2026-09-19T11:04:00.000Z',
+    });
+  });
+
+  it('booleans the fill-up flag into SQLite 0/1', () => {
+    expect(checkRowFrom({ ...run, isFillup: true }).is_fillup).toBe(1);
+    expect(checkRowFrom({ ...run, isFillup: false }).is_fillup).toBe(0);
+  });
+
+  it('leaves car_reported_at null when the car did not say, rather than using ts', () => {
+    expect(checkRowFrom({ ...run, lastupdate: null }).car_reported_at).toBeNull();
   });
 });

@@ -49,7 +49,71 @@ Add to `~/.config/itguy/itguy.toml` on plexpi:
 [services.bluelinky]
 tag = "bluelinky"
 strategy = "image-pull"
-compose_dir = "/home/pi/fuelbot/deployment"
+compose_dir = "/home/pi/bluelinky/deployment"
+```
+
+> **The checkout is `/home/pi/bluelinky`, not `/home/pi/fuelbot`.** This block
+> said `fuelbot` until 2026-09-22 and no such directory has ever existed on the
+> box. It was copied out of here into a parsons-pulse design memo and became
+> one of the two candidate paths that homelab #498 was sent to go and find.
+> Checked on the box: `ls /home/pi/fuelbot` is a `No such file or directory`,
+> and the running container reports
+> `com.docker.compose.project.working_dir=/home/pi/bluelinky`.
+>
+> Two further things are true on the box today and are NOT described by this
+> block: there is no `~/.config/itguy/itguy.toml` at all, and the container is
+> running from an untracked `docker-compose.yml` at the checkout root rather
+> than from `deployment/docker-compose.yml`. Left as-is rather than quietly
+> "corrected" here, because reconciling them is a deploy change and not a docs
+> change.
+
+### Machine-readable status (`npm run status-json`)
+
+```sh
+npm run status-json
+{"vehicle":"2020 SANTA FE","range_miles":88,"reported_at":"2026-09-19T11:04:00.000Z"}
+```
+
+One JSON object on stdout, for
+[parsons-pulse](https://github.com/tclancy/parsons-pulse)'s fuel producer,
+which runs it as `FUEL_STATUS_COMMAND` and posts the result to the fridge
+dashboard. On the box that command is:
+
+```sh
+docker exec bluelinky-fuel-monitor npm run --silent status-json
+```
+
+**It does not call Hyundai.** It reads the newest row of the SQLite history
+that `monitor.ts` already writes hourly, so it costs no extra API traffic, no
+12V drain, and no second copy of the credentials. It opens the database
+read-only.
+
+Exit codes, which are the diagnostic:
+
+| Code | Meaning                                                                      |
+| ---- | ---------------------------------------------------------------------------- |
+| 0    | a JSON object on stdout                                                      |
+| 1    | the database could not be opened, or its newest row has no `car_reported_at` |
+
+`reported_at` is **`checks.car_reported_at`** — when the _car_ last reported to
+Hyundai — and never `checks.ts`, which is when the monitor ran. The dashboard
+asks both questions separately: it greys the row when the producer stops
+(3h15m) and dates the number when the car goes quiet (3 days). Mapping check
+time onto `reported_at` would collapse the second into the first, so a car that
+has not phoned home in a week would render as a confident, fresh number.
+
+Rows written before that column existed have a null in it and are **not**
+emitted; falling back to `ts` is exactly the bug above. After a rebuild the
+first `monitor.ts` tick (hourly, top of the hour) writes a usable row, and
+until then the command exits 1 — which the producer reads as an unreachable
+car, not as a healthy tick.
+
+Deploying this needs an image **rebuild**, not a restart: the Dockerfile
+`COPY . .`s the source in, so a plain `docker compose restart` re-runs the old
+image.
+
+```sh
+cd /home/pi/bluelinky && git pull && docker compose up -d --build
 ```
 
 ## Install

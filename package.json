@@ -16,6 +16,7 @@
     "debug": "ts-node -p debug.ts",
     "debug:modern": "tsx debug.ts",
     "get-fuel": "tsx get-fuel-level.ts",
+    "status-json": "tsx status-json.ts",
     "monitor-fuel": "tsx monitor-fuel.ts",
     "monitor": "tsx monitor.ts",
     "test-alert": "TEST_ALERT=low tsx monitor.ts",
