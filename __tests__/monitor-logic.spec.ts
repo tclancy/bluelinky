@@ -2,6 +2,7 @@
  * Tests for the pure logic helpers in src/monitor-helpers.ts.
  * These are stateless functions that can be tested without a Bluelink API.
  */
+import americanStatus from './mock/americanStatus.json';
 import { carReportedAt, checkRowFrom, newlyLitWheels, tpmsSeverity } from '../src/monitor-helpers';
 
 describe('newlyLitWheels', () => {
@@ -277,5 +278,32 @@ describe('checkRowFrom', () => {
 
   it('leaves car_reported_at null when the car did not say, rather than using ts', () => {
     expect(checkRowFrom({ ...run, lastupdate: null }).car_reported_at).toBeNull();
+  });
+});
+
+describe('carReportedAt against what the vendor parser actually produces', () => {
+  it('accepts the American parser output shape', () => {
+    // Every other case in this file is a hand-written literal, which pins my
+    // assumption rather than the vendor's behaviour. `american.vehicle.ts:301`
+    // is `lastupdate: new Date(vehicleStatus?.dateTime)`, so this reproduces
+    // that expression against the repo's own captured API response.
+    const captured = americanStatus.dateTime;
+    const asTheParserMakesIt = new Date(captured);
+
+    expect(carReportedAt(asTheParserMakesIt)).toBe('2020-05-20T23:20:39.000Z');
+  });
+
+  it('control: an absent dateTime is the Invalid Date the guard exists for', () => {
+    // Same expression with the field missing -- `new Date(undefined)`. If the
+    // live account ever stops sending `dateTime`, this is the shape that
+    // arrives, and it must become null rather than throw or become "now".
+    expect(carReportedAt(new Date(undefined as unknown as string))).toBeNull();
+  });
+
+  it("control: Hyundai's compact spelling would NOT parse, and must not be invented", () => {
+    // `YYYYMMDDHHmmss` appears elsewhere in this API. `new Date()` on it is an
+    // Invalid Date in Node, so it returns null -- the honest answer -- rather
+    // than a plausible-looking wrong timestamp.
+    expect(carReportedAt(new Date('20260922123629'))).toBeNull();
   });
 });

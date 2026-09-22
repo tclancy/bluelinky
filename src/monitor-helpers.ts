@@ -4,7 +4,7 @@
  * the credential validation side effects in monitor.ts.
  */
 
-import { CheckRow as CheckRowShape } from './vehicle-db';
+import type { CheckRow as CheckRowShape } from './vehicle-db';
 
 /** The insertable shape of a `checks` row (no `id` until SQLite assigns one). */
 type CheckRow = Omit<CheckRowShape, 'id'>;

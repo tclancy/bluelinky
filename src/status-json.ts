@@ -14,7 +14,7 @@
  * costs for a number already sitting on disk.
  */
 
-import { CheckRow, VehicleDb, defaultDbPath } from './vehicle-db';
+import { CheckRow, VehicleDb, resolveDbPath } from './vehicle-db';
 
 /**
  * Exactly the keys `producer/fuel_level.py`'s `REQUIRED_STATUS_FIELDS` names.
@@ -68,10 +68,18 @@ export function unopenable(dbPath: string, reason: string): string {
   );
 }
 
+export function unreadable(dbPath: string, reason: string): string {
+  return (
+    `cannot read ${dbPath}: ${reason}. The file opened but the history could ` +
+    'not be queried, which is corruption or a truncated file rather than a ' +
+    'missing one -- the monitor writes this database, so it is the thing to look at.'
+  );
+}
+
 export const NO_USABLE_READING =
   'no usable reading: the newest row in vehicle-monitor.db has no car report time. ' +
   'Rows written before the car_reported_at column existed never will; the next ' +
-  'monitor.ts run (hourly, top of the hour) writes one that does.';
+  'monitor.ts run writes one that does -- on container start, then hourly at :00.';
 
 /**
  * What the entry point should print, and with which exit code.
@@ -89,7 +97,7 @@ export const NO_USABLE_READING =
  * state volume is not mounted" stays distinguishable from "no readings yet"
  * instead of being papered over with an empty database.
  */
-export function statusReport(dbPath: string = defaultDbPath()): {
+export function statusReport(dbPath: string = resolveDbPath()): {
   code: number;
   stdout: string;
   stderr: string;
@@ -108,12 +116,22 @@ export function statusReport(dbPath: string = defaultDbPath()): {
       stderr: unopenable(dbPath, err instanceof Error ? err.message : String(err)),
     };
   }
+  // Opening and QUERYING fail separately, and only the first was guarded at
+  // first. A zero-byte or corrupt file opens perfectly well and throws at
+  // `prepare` -- `no such table: checks`, `file is not a database` -- which is
+  // exactly when a sentence is worth most on a Pi with an SD card.
   try {
     const document = buildStatusDocument(db.getLastCheck());
     if (document === null) {
       return { code: 1, stdout: '', stderr: NO_USABLE_READING };
     }
     return { code: 0, stdout: JSON.stringify(document), stderr: '' };
+  } catch (err) {
+    return {
+      code: 1,
+      stdout: '',
+      stderr: unreadable(dbPath, err instanceof Error ? err.message : String(err)),
+    };
   } finally {
     db.close();
   }

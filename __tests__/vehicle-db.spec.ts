@@ -271,3 +271,26 @@ describe('VehicleDb migration onto a pre-existing checks table', () => {
     cleanup();
   });
 });
+
+describe('the migration narrows what it forgives', () => {
+  it('re-raises an ALTER TABLE failure that is not a lost race', () => {
+    // The `catch` in `addColumnIfMissing` exists only for the one benign
+    // outcome -- two writers racing, the loser finding the column already
+    // there. A bare `catch {}` would look identical and would swallow a real
+    // structural problem, leaving a database that silently never migrates.
+    //
+    // A view is the cheapest thing that fails for a DIFFERENT reason:
+    // `PRAGMA table_info` reports its columns, so the missing-column branch is
+    // taken, and the ALTER then fails with "Cannot add a column to a view".
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bluelinky-view-'));
+    const dbPath = path.join(dir, 'view.db');
+    const raw = new Database(dbPath);
+    raw.exec('CREATE TABLE real_checks (id INTEGER PRIMARY KEY, ts TEXT)');
+    raw.exec('CREATE VIEW checks AS SELECT id, ts FROM real_checks');
+    raw.close();
+
+    expect(() => new VehicleDb(dbPath)).toThrow(/Cannot add a column to a view/);
+
+    fs.rmSync(dir, { recursive: true });
+  });
+});

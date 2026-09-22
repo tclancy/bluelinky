@@ -18,4 +18,9 @@ if (report.stderr) {
   // eslint-disable-next-line no-console
   console.error(report.stderr);
 }
-process.exit(report.code);
+// `process.exitCode`, not `process.exit()`. Node's stdout is asynchronous when
+// it is a pipe, which is exactly how the fuel producer invokes this
+// (`capture_output=True`), and `process.exit()` can cut a buffered write off
+// mid-flight. The database is already closed, so nothing holds the loop open
+// and the process ends on its own.
+process.exitCode = report.code;

@@ -3,7 +3,12 @@ import * as os from 'os';
 import * as path from 'path';
 import Database from 'better-sqlite3';
 import { CheckRow, VehicleDb } from '../src/vehicle-db';
-import { REQUIRED_STATUS_FIELDS, buildStatusDocument, statusReport } from '../src/status-json';
+import {
+  NO_USABLE_READING,
+  REQUIRED_STATUS_FIELDS,
+  buildStatusDocument,
+  statusReport,
+} from '../src/status-json';
 
 /**
  * A row in the shape the live plexpi database actually stores, with the two
@@ -41,11 +46,17 @@ describe('buildStatusDocument', () => {
     expect(document!.reported_at).not.toBe('2026-09-22T18:00:09.885Z');
   });
 
-  it('emits exactly the contract keys and nothing else', () => {
-    // parsons-pulse `producer/fuel_level.py` checks
+  it('names the contract fields parsons-pulse actually requires', () => {
+    // Literals, not a reference. parsons-pulse `producer/fuel_level.py` has
     // REQUIRED_STATUS_FIELDS = ("vehicle", "range_miles", "reported_at") and
-    // treats a missing one as an unreadable car. A rename here is a silent
-    // outage there, so the key set is pinned rather than spot-checked.
+    // treats a missing one as an unreadable car -- so these three strings are
+    // the external truth, and the only thing worth pinning. Comparing the
+    // constant to the module that builds the document would pass under a
+    // coordinated rename, which is precisely the silent outage.
+    expect([...REQUIRED_STATUS_FIELDS]).toEqual(['vehicle', 'range_miles', 'reported_at']);
+  });
+
+  it('emits exactly those keys and nothing else', () => {
     expect(Object.keys(buildStatusDocument(row())!).sort()).toEqual(
       [...REQUIRED_STATUS_FIELDS].sort()
     );
@@ -157,7 +168,12 @@ describe('the reader never writes', () => {
     );
     raw.close();
 
-    expect(statusReport(dbPath).code).toBe(1);
+    const report = statusReport(dbPath);
+    expect(report.code).toBe(1);
+    // Both failure modes return 1, so the code alone cannot tell "read the
+    // newest row and found no car time" from "could not open the file at all"
+    // -- and this test is only meaningful if it is the former.
+    expect(report.stderr).toBe(NO_USABLE_READING);
 
     const after = new Database(dbPath, { readonly: true });
     const columns = (after.prepare('PRAGMA table_info(checks)').all() as { name: string }[]).map(
@@ -165,6 +181,78 @@ describe('the reader never writes', () => {
     );
     after.close();
     expect(columns).not.toContain('car_reported_at');
+
+    fs.rmSync(dir, { recursive: true });
+  });
+});
+
+describe('an unreadable database is a third cause, not a stack trace', () => {
+  it('says so for a file that is not a database at all', () => {
+    // The realistic Pi failure: an SD card truncates or corrupts the file.
+    // better-sqlite3 OPENS it happily and throws at `prepare`, so the guard
+    // around the open cannot see this one.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bluelinky-corrupt-'));
+    const dbPath = path.join(dir, 'vehicle-monitor.db');
+    fs.writeFileSync(dbPath, 'this is not a database\n');
+
+    const report = statusReport(dbPath);
+
+    expect(report.code).toBe(1);
+    expect(report.stdout).toBe('');
+    expect(report.stderr).toContain('cannot read');
+    expect(report.stderr).toContain('the monitor writes this database');
+    expect(report.stderr).not.toContain('at Database.prepare');
+
+    fs.rmSync(dir, { recursive: true });
+  });
+
+  it('says so for an empty file, which opens as a database with no tables', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bluelinky-empty-'));
+    const dbPath = path.join(dir, 'vehicle-monitor.db');
+    fs.writeFileSync(dbPath, '');
+
+    const report = statusReport(dbPath);
+
+    expect(report.code).toBe(1);
+    expect(report.stderr).toContain('cannot read');
+    // Distinct from NO_USABLE_READING: there is no history here to be missing
+    // a car time, so saying "wait for the next tick" would be wrong advice.
+    expect(report.stderr).not.toBe(NO_USABLE_READING);
+
+    fs.rmSync(dir, { recursive: true });
+  });
+});
+
+describe('the reader and the writer resolve the same database', () => {
+  it('honours VEHICLE_DB_PATH, which monitor.ts has always honoured', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bluelinky-envpath-'));
+    const dbPath = path.join(dir, 'elsewhere.db');
+    const db = new VehicleDb(dbPath);
+    db.insertCheck({
+      ts: '2026-09-22T18:00:09.885Z',
+      vehicle_name: '2020 SANTA FE',
+      range_mi: 88,
+      temp_f: null,
+      is_fillup: 0,
+      odometer_mi: null,
+      car_reported_at: '2026-09-22T16:36:29.000Z',
+    });
+    db.close();
+
+    const previous = process.env.VEHICLE_DB_PATH;
+    process.env.VEHICLE_DB_PATH = dbPath;
+    try {
+      // No argument: this is the path production takes.
+      const report = statusReport();
+      expect(report.code).toBe(0);
+      expect(JSON.parse(report.stdout).reported_at).toBe('2026-09-22T16:36:29.000Z');
+    } finally {
+      if (previous === undefined) {
+        delete process.env.VEHICLE_DB_PATH;
+      } else {
+        process.env.VEHICLE_DB_PATH = previous;
+      }
+    }
 
     fs.rmSync(dir, { recursive: true });
   });

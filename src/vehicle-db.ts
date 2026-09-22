@@ -135,8 +135,19 @@ export class VehicleDb {
     const existing = (
       this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
     ).map(c => c.name);
-    if (!existing.includes(column)) {
+    if (existing.includes(column)) {
+      return;
+    }
+    try {
       this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    } catch (err) {
+      // `entrypoint.sh` runs a check on container start, and cron runs one at
+      // :00, so two writers can in principle open this within the one-run
+      // migration window and both see the column missing. Losing that race is
+      // success -- the column is there. EVERY other error still raises.
+      if (!(err instanceof Error) || !/duplicate column name/i.test(err.message)) {
+        throw err;
+      }
     }
   }
 
@@ -189,6 +200,19 @@ export class VehicleDb {
   close(): void {
     this.db.close();
   }
+}
+
+/**
+ * The database both the writer and the reader must agree on.
+ *
+ * `monitor.ts` honoured `VEHICLE_DB_PATH` (documented in `.env.example`) and
+ * the status reader originally called `defaultDbPath()` directly, so setting
+ * that variable pointed the reader at a file the monitor never writes -- a
+ * permanent exit 1 that the fuel producer can only read as an unreachable car.
+ * Resolved in one place so the two cannot diverge again.
+ */
+export function resolveDbPath(): string {
+  return process.env.VEHICLE_DB_PATH ?? defaultDbPath();
 }
 
 /** Returns the path to the SQLite DB inside the state directory. */
