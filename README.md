@@ -34,12 +34,16 @@ ansible-vault encrypt_string 'value' --name 'vault_bluelinky_username'
 itguy deploy bluelinky
 ```
 
-### Deploying
+### Deploying (intent — see "Deploying by hand" for what runs today)
 
 ```bash
 itguy deploy bluelinky          # pulls latest code, templates .env, restarts container
 itguy deploy bluelinky --force  # force-recreate (rebuilds image from source)
 ```
+
+Neither of these works on plexpi as of 2026-09-22: there is no itguy config
+file on that box. Use the by-hand recipe below until the itguy block under it
+is real.
 
 ### itguy integration
 
@@ -49,8 +53,90 @@ Add to `~/.config/itguy/itguy.toml` on plexpi:
 [services.bluelinky]
 tag = "bluelinky"
 strategy = "image-pull"
-compose_dir = "/home/pi/fuelbot/deployment"
+compose_dir = "/home/pi/bluelinky/deployment"
 ```
+
+> **The checkout is `/home/pi/bluelinky`, not `/home/pi/fuelbot`.** This block
+> said `fuelbot` until 2026-09-22 and no such directory has ever existed on the
+> box. It was copied out of here into a parsons-pulse design memo and became
+> one of the two candidate paths that homelab #498 was sent to go and find.
+>
+> **Nothing on the box is deployed this way today.** Measured 2026-09-22:
+> there is no `~/.config/itguy/itguy.toml` at all, and the running container
+> reports `com.docker.compose.project.working_dir=/home/pi/bluelinky` — it is
+> up from an **untracked** `docker-compose.yml` at the checkout root, not from
+> `deployment/docker-compose.yml`. That root file has `build: context: .` and
+> the same `fuel-state` named volume, so the deploy that actually works is the
+> one under "Deploying by hand" below. The itguy block is kept as intent;
+> reconciling the two is a deploy change, not a docs change.
+
+### Deploying by hand (what the box actually does)
+
+```sh
+cd /home/pi/bluelinky && git pull && docker compose up -d --build
+```
+
+**`--build` is required, not optional.** The Dockerfile `COPY . .`s the source
+into the image, so `docker compose restart` re-runs the old code with a
+straight face. The named volume `bluelinky_fuel-state` survives a recreate,
+which is what keeps the history.
+
+## Machine-readable status (`npm run status-json`)
+
+```sh
+npm run --silent status-json
+{"vehicle":"2020 SANTA FE","range_miles":88,"reported_at":"2026-09-22T16:36:29.000Z"}
+```
+
+One JSON object on stdout, for
+[parsons-pulse](https://github.com/tclancy/parsons-pulse)'s fuel producer,
+which runs it as `FUEL_STATUS_COMMAND` and posts the result to the fridge
+dashboard. On the box:
+
+```sh
+docker exec bluelinky-fuel-monitor npx tsx /app/status-json.ts
+```
+
+**Prefer that form over `npm run`.** npm prints its `> bluelinky@10.0.0 status-json` banner to **stdout**, and the producer does `json.loads()` on the
+whole stream — so the npm form works only with `--silent`, and a later edit
+that drops the flag is a silent outage rather than an error.
+
+**It does not call Hyundai.** It reads the newest row of the SQLite history
+that `monitor.ts` already writes hourly, so it costs no extra API traffic, no
+12V drain, and no second copy of the credentials. It opens the database
+**read-only**, which also means it will not create a missing one — an unmounted
+state volume stays distinguishable from "no readings yet". It honours
+`VEHICLE_DB_PATH` exactly as `monitor.ts` does; note that `docker exec` does
+not source `/app/.env`, so if you set that variable you must also pass it with
+`-e`.
+
+Exit codes, which are the diagnostic:
+
+| Code | Meaning                                                                                                                |
+| ---- | ---------------------------------------------------------------------------------------------------------------------- |
+| 0    | a JSON object on stdout                                                                                                |
+| 1    | the database could not be opened, could not be queried, or its newest row has no `car_reported_at` — stderr says which |
+
+`reported_at` is **`checks.car_reported_at`** — when the _car_ last reported to
+Hyundai — and never `checks.ts`, which is when the monitor ran. The two really
+do differ: on 2026-09-22 the 14:00 ET check read a car that had last reported
+at 12:36 ET. The dashboard asks both questions separately, greying the row when
+the producer stops (3h15m) and dating the number when the car goes quiet
+(3 days). Mapping check time onto `reported_at` would collapse the second into
+the first, so a car that had not phoned home in a week would render as a
+confident, fresh number.
+
+Rows written before that column existed have a null in it and are **not**
+emitted; falling back to `ts` is exactly the bug above. `deployment/entrypoint.sh`
+runs a check on container start, so after a rebuild a usable row lands
+immediately rather than at the next `:00` — but until one does, the command
+exits 1, which the producer reads as an unreachable car rather than a healthy
+tick.
+
+One asymmetry worth knowing before you debug the car: if the **monitor** stops
+while the producer keeps running, the newest row stops moving and its
+`car_reported_at` ages past the dashboard's 3-day window. The card will say the
+car is quiet when what actually stopped is the container.
 
 ## Install
 

@@ -28,6 +28,7 @@ import * as path from 'path';
 import { createAlertBackend, AlertBackend } from './alert-backends.ts';
 import { VehicleDb, defaultDbPath } from './src/vehicle-db.ts';
 import {
+  checkRowFrom,
   fetchOutdoorTempF,
   newlyLitWheels,
   tpmsSeverity,
@@ -218,14 +219,20 @@ async function monitor(): Promise<void> {
       }
 
       // ── Write check to DB ──────────────────────────────────────────────────
-      const checkId = db.insertCheck({
-        ts,
-        vehicle_name: vehicleName,
-        range_mi: currentRange,
-        temp_f: tempF,
-        is_fillup: isFillup ? 1 : 0,
-        odometer_mi: odometerMi,
-      });
+      const checkId = db.insertCheck(
+        checkRowFrom({
+          ts,
+          vehicleName,
+          rangeMi: currentRange,
+          tempF,
+          isFillup,
+          odometerMi,
+          // NOT `ts`. `ts` is when this run happened; `lastupdate` is when the
+          // car last spoke to Hyundai. A parked car keeps answering with a
+          // days-old reading, and only that field can say so.
+          lastupdate: status.lastupdate,
+        })
+      );
 
       db.insertTpms({
         check_id: checkId,

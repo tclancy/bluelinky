@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-09-22
+
+- Add `npm run status-json`: one JSON object (`vehicle`, `range_miles`,
+  `reported_at`) read from the local SQLite history, for parsons-pulse's fuel
+  producer (`FUEL_STATUS_COMMAND`). No extra Hyundai call; opens read-only.
+- Add `checks.car_reported_at`, populated from `status.lastupdate`, so the
+  history records when the **car** last reported and not only when the monitor
+  ran. Migrated in place with an idempotent `ALTER TABLE`; the 3787 existing
+  rows keep a null there and are never emitted as a reading.
+- Fix the `compose_dir` in README's itguy block: the checkout is
+  `/home/pi/bluelinky`, not `/home/pi/fuelbot` (issue #14).
+
 ## 2026-04-16
 
 - Fix TypeScript build error: annotate `result` as `string[]` in `newlyLitWheels` so `allLamps` push passes type-check (issue #7, PR #6 CI fix)

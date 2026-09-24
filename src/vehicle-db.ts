@@ -2,7 +2,8 @@
  * SQLite database for vehicle monitoring history.
  *
  * Three tables:
- *   checks        — one row per monitoring run (fuel range + fillup flag + odometer)
+ *   checks        — one row per monitoring run (fuel range + fillup flag +
+ *                   odometer + when the car itself last reported)
  *   tpms_readings — per-wheel lamp state per run
  *   alerts        — history of every alert sent
  *
@@ -22,6 +23,16 @@ export interface CheckRow {
   temp_f: number | null;
   is_fillup: number; // 0 or 1
   odometer_mi: number | null;
+  /**
+   * When the CAR last reported to Hyundai, from `status.lastupdate`.
+   *
+   * Not the same question as `ts`, which is when *we* ran. A parked car keeps
+   * answering with the reading it filed days ago, so a consumer that wants to
+   * know whether the vehicle is still talking needs this and cannot derive it
+   * from `ts`. Nullable because the API may omit it, and because every row
+   * written before this column existed has nothing to put here.
+   */
+  car_reported_at: string | null;
 }
 
 export interface TpmsRow {
@@ -50,7 +61,8 @@ const SCHEMA = `
     range_mi    REAL    NOT NULL,
     temp_f      REAL,
     is_fillup   INTEGER NOT NULL DEFAULT 0,
-    odometer_mi REAL
+    odometer_mi REAL,
+    car_reported_at TEXT
   );
 
   CREATE TABLE IF NOT EXISTS tpms_readings (
@@ -72,25 +84,78 @@ const SCHEMA = `
   );
 `;
 
+export interface VehicleDbOptions {
+  /**
+   * Open without write access and skip schema setup.
+   *
+   * A reader must not be the thing that migrates the database: `initSchema`
+   * issues DDL, and DDL on a `readonly` connection throws. Skipping it also
+   * means a reader opened against a pre-migration file simply finds no
+   * `car_reported_at` on the row — which `buildStatusDocument` already treats
+   * as "no usable reading" — instead of failing to open at all.
+   */
+  readonly?: boolean;
+}
+
 export class VehicleDb {
   private db: Database.Database;
 
-  constructor(dbPath: string) {
-    this.db = new Database(dbPath);
-    this.db.pragma('journal_mode = WAL');
+  constructor(dbPath: string, options: VehicleDbOptions = {}) {
+    this.db = new Database(dbPath, { readonly: options.readonly === true });
+    // `journal_mode` is itself a write to the database header, so it is not
+    // available on a readonly connection and must not be attempted there.
+    if (!options.readonly) {
+      this.db.pragma('journal_mode = WAL');
+    }
     this.db.pragma('foreign_keys = ON');
-    this.initSchema();
+    if (!options.readonly) {
+      this.initSchema();
+    }
   }
 
   private initSchema(): void {
     this.db.exec(SCHEMA);
+    this.addColumnIfMissing('checks', 'car_reported_at', 'TEXT');
+  }
+
+  /**
+   * Add a column to a table that may already exist.
+   *
+   * `CREATE TABLE IF NOT EXISTS` is a no-op against a table that is already
+   * there, so the schema string above can only ever describe a database
+   * created *after* the column was added. Production is not one: plexpi's
+   * `vehicle-monitor.db` held 3787 `checks` rows before `car_reported_at`
+   * existed. Without this, every test would pass against a fresh table while
+   * the only database that matters stayed on the old shape.
+   *
+   * Driven off `PRAGMA table_info` rather than catching the duplicate-column
+   * error, so a genuine failure still raises.
+   */
+  private addColumnIfMissing(table: string, column: string, type: string): void {
+    const existing = (
+      this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
+    ).map(c => c.name);
+    if (existing.includes(column)) {
+      return;
+    }
+    try {
+      this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    } catch (err) {
+      // `entrypoint.sh` runs a check on container start, and cron runs one at
+      // :00, so two writers can in principle open this within the one-run
+      // migration window and both see the column missing. Losing that race is
+      // success -- the column is there. EVERY other error still raises.
+      if (!(err instanceof Error) || !/duplicate column name/i.test(err.message)) {
+        throw err;
+      }
+    }
   }
 
   /** Insert a monitoring check. Returns the new row id. */
   insertCheck(row: Omit<CheckRow, 'id'>): number {
     const stmt = this.db.prepare(`
-      INSERT INTO checks (ts, vehicle_name, range_mi, temp_f, is_fillup, odometer_mi)
-      VALUES (@ts, @vehicle_name, @range_mi, @temp_f, @is_fillup, @odometer_mi)
+      INSERT INTO checks (ts, vehicle_name, range_mi, temp_f, is_fillup, odometer_mi, car_reported_at)
+      VALUES (@ts, @vehicle_name, @range_mi, @temp_f, @is_fillup, @odometer_mi, @car_reported_at)
     `);
     const result = stmt.run(row);
     return Number(result.lastInsertRowid);
@@ -135,6 +200,19 @@ export class VehicleDb {
   close(): void {
     this.db.close();
   }
+}
+
+/**
+ * The database both the writer and the reader must agree on.
+ *
+ * `monitor.ts` honoured `VEHICLE_DB_PATH` (documented in `.env.example`) and
+ * the status reader originally called `defaultDbPath()` directly, so setting
+ * that variable pointed the reader at a file the monitor never writes -- a
+ * permanent exit 1 that the fuel producer can only read as an unreachable car.
+ * Resolved in one place so the two cannot diverge again.
+ */
+export function resolveDbPath(): string {
+  return process.env.VEHICLE_DB_PATH ?? defaultDbPath();
 }
 
 /** Returns the path to the SQLite DB inside the state directory. */
