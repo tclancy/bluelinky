@@ -33,6 +33,25 @@ export interface CheckRow {
    * written before this column existed has nothing to put here.
    */
   car_reported_at: string | null;
+  /**
+   * The 12V starter battery's state of charge, 0-100, from `battery.batSoc`.
+   *
+   * Not the traction battery: this car is an ICE Santa Fe and `batSoc` is the
+   * accessory battery the starter draws on. Nullable for the same two reasons
+   * as `car_reported_at` — the API may omit it, and the 3787 rows written
+   * before this column existed have nothing to put here.
+   *
+   * **Required rather than optional on purpose.** `Omit<CheckRow, 'id'>` is the
+   * insert shape, so a required field forces every writer to say what it knows;
+   * an optional one lets a call site that forgot the field compile, and the
+   * value it would then store is the one reading this column must never carry —
+   * a confident number nobody measured.
+   *
+   * Reading is the asymmetric half: `getLastCheck()` is a `SELECT *` cast, so a
+   * row written before the migration yields `undefined` here, not `null`, and
+   * the declared type does not say so. Test it with `== null`, never `=== null`.
+   */
+  battery_12v_pct: number | null;
 }
 
 export interface TpmsRow {
@@ -62,7 +81,8 @@ const SCHEMA = `
     temp_f      REAL,
     is_fillup   INTEGER NOT NULL DEFAULT 0,
     odometer_mi REAL,
-    car_reported_at TEXT
+    car_reported_at TEXT,
+    battery_12v_pct INTEGER
   );
 
   CREATE TABLE IF NOT EXISTS tpms_readings (
@@ -116,6 +136,7 @@ export class VehicleDb {
   private initSchema(): void {
     this.db.exec(SCHEMA);
     this.addColumnIfMissing('checks', 'car_reported_at', 'TEXT');
+    this.addColumnIfMissing('checks', 'battery_12v_pct', 'INTEGER');
   }
 
   /**
@@ -154,11 +175,34 @@ export class VehicleDb {
   /** Insert a monitoring check. Returns the new row id. */
   insertCheck(row: Omit<CheckRow, 'id'>): number {
     const stmt = this.db.prepare(`
-      INSERT INTO checks (ts, vehicle_name, range_mi, temp_f, is_fillup, odometer_mi, car_reported_at)
-      VALUES (@ts, @vehicle_name, @range_mi, @temp_f, @is_fillup, @odometer_mi, @car_reported_at)
+      INSERT INTO checks (ts, vehicle_name, range_mi, temp_f, is_fillup, odometer_mi, car_reported_at, battery_12v_pct)
+      VALUES (@ts, @vehicle_name, @range_mi, @temp_f, @is_fillup, @odometer_mi, @car_reported_at, @battery_12v_pct)
     `);
     const result = stmt.run(row);
     return Number(result.lastInsertRowid);
+  }
+
+  /**
+   * Insert a check and its TPMS reading as one unit. Returns the check's id.
+   *
+   * The two inserts were sequential and unwrapped, which let a reader see a
+   * check with no TPMS row — and the status reader now looks the TPMS row up
+   * *by* the newest check's id, so that window renders as "this car reports no
+   * tire lamps" rather than as a momentary gap. `better-sqlite3`'s
+   * `transaction()` is synchronous and both statements are, so the window
+   * closes with no change to the call site's shape.
+   *
+   * `check_id` is supplied here rather than by the caller: it does not exist
+   * until the first statement has run, and asking a caller for it is asking it
+   * to run the two statements itself, which is the thing being fixed.
+   */
+  insertCheckWithTpms(check: Omit<CheckRow, 'id'>, tpms: Omit<TpmsRow, 'id' | 'check_id'>): number {
+    const both = this.db.transaction((): number => {
+      const checkId = this.insertCheck(check);
+      this.insertTpms({ ...tpms, check_id: checkId });
+      return checkId;
+    });
+    return both();
   }
 
   /** Insert a TPMS reading linked to a check. */
@@ -197,9 +241,43 @@ export class VehicleDb {
     );
   }
 
+  /**
+   * The TPMS reading belonging to one check, or null if that check has none.
+   *
+   * Distinct from `getLastTpms()`, and the distinction is the whole reason this
+   * exists. A consumer that reports a range from the newest check alongside
+   * lamps from `getLastTpms()` is describing two different polls whenever the
+   * newest check has no TPMS row — a failed TPMS insert, or a pre-`tpms_readings`
+   * row — and the mismatch is invisible because both halves look fresh.
+   */
+  getTpmsForCheck(checkId: number): TpmsRow | null {
+    return (
+      (this.db
+        .prepare('SELECT * FROM tpms_readings WHERE check_id = ? ORDER BY id DESC LIMIT 1')
+        .get(checkId) as TpmsRow | undefined) ?? null
+    );
+  }
+
   close(): void {
     this.db.close();
   }
+}
+
+/**
+ * `battery_12v_pct`'s one coercion rule, for both sides of the round-trip.
+ *
+ * Lives beside the column rather than in the writer because the reader needs
+ * exactly the same predicate and the two must not drift: SQLite's typing is
+ * dynamic, so an `INTEGER` column will hand back whatever was put in it, and a
+ * pre-migration row hands back `undefined` from a `SELECT *`.
+ *
+ * `Number.isFinite`, not `typeof value === 'number'`: `NaN` is a number, and
+ * `batSoc` arrives through an `as VehicleStatus` cast over a vendor parser, so
+ * its runtime type is a claim. **A reported 0 survives as 0** — a flat battery
+ * is a reading, and the one value this must never invent is a plausible one.
+ */
+export function batteryPctOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
 /**

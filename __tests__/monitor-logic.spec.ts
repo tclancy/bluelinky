@@ -250,6 +250,7 @@ describe('checkRowFrom', () => {
     isFillup: false,
     odometerMi: null,
     lastupdate: new Date('2026-09-19T11:04:00.000Z'),
+    batteryCharge12v: 84,
   };
 
   it('maps the car report time from lastupdate, not from ts', () => {
@@ -268,7 +269,37 @@ describe('checkRowFrom', () => {
       is_fillup: 0,
       odometer_mi: null,
       car_reported_at: '2026-09-19T11:04:00.000Z',
+      battery_12v_pct: 84,
     });
+  });
+
+  it('carries the 12V battery percentage the car reported', () => {
+    // 84 is what the live Santa Fe returned on the 2026-10-07 probe.
+    expect(checkRowFrom(run).battery_12v_pct).toBe(84);
+  });
+
+  it('stores a reported 0 as 0, not as null', () => {
+    // The one value a "falsy means unknown" guard destroys, and the one that
+    // most needs reporting: a flat 12V battery is a reading, not an absence.
+    expect(checkRowFrom({ ...run, batteryCharge12v: 0 }).battery_12v_pct).toBe(0);
+  });
+
+  it('stores null, not 0, when the car reports no battery value', () => {
+    // `batteryCharge12v` is optional on `VehicleStatus` and this field is
+    // reached through an `as VehicleStatus` cast, so the absent case is the
+    // ordinary one for any region or model year that omits `batSoc`.
+    expect(checkRowFrom({ ...run, batteryCharge12v: undefined }).battery_12v_pct).toBeNull();
+    expect(checkRowFrom({ ...run, batteryCharge12v: null }).battery_12v_pct).toBeNull();
+  });
+
+  it('stores null for a value that is not a finite number', () => {
+    // `NaN` is the one that a `typeof === 'number'` guard lets through, and it
+    // round-trips out of SQLite as NULL anyway -- so letting it in would mean
+    // the writer and the reader disagree about what was stored.
+    expect(checkRowFrom({ ...run, batteryCharge12v: NaN }).battery_12v_pct).toBeNull();
+    expect(checkRowFrom({ ...run, batteryCharge12v: Infinity }).battery_12v_pct).toBeNull();
+    expect(checkRowFrom({ ...run, batteryCharge12v: '84' }).battery_12v_pct).toBeNull();
+    expect(checkRowFrom({ ...run, batteryCharge12v: { batSoc: 84 } }).battery_12v_pct).toBeNull();
   });
 
   it('booleans the fill-up flag into SQLite 0/1', () => {

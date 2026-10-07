@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import Database from 'better-sqlite3';
-import { CheckRow, VehicleDb } from '../src/vehicle-db';
+import { CheckRow, TpmsRow, VehicleDb } from '../src/vehicle-db';
 import {
   NO_USABLE_READING,
   REQUIRED_STATUS_FIELDS,
@@ -27,13 +27,46 @@ function row(overrides: Partial<CheckRow> = {}): CheckRow {
     is_fillup: 0,
     odometer_mi: null,
     car_reported_at: '2026-09-19T11:04:00.000Z',
+    battery_12v_pct: 84,
     ...overrides,
   };
 }
 
+/**
+ * The TPMS row belonging to the check above, with ONE lamp lit.
+ *
+ * Not all-off and not all-on: a fixture whose five booleans are identical
+ * cannot tell a correct per-wheel mapping from a transposed one, and the
+ * document's whole job is to say *which* wheel.
+ */
+function tpms(overrides: Partial<TpmsRow> = {}): TpmsRow {
+  return {
+    id: 3787,
+    check_id: 3787,
+    ts: '2026-09-22T18:00:09.885Z',
+    front_left: 1,
+    front_right: 0,
+    rear_left: 0,
+    rear_right: 0,
+    all_lamps: 0,
+    ...overrides,
+  };
+}
+
+/**
+ * A row as `SELECT *` returns it from a database written before the battery
+ * column existed: the key is **absent**, which reads as `undefined` and not as
+ * `null`. That distinction is why `buildStatusDocument` cannot use `!== null`.
+ */
+function preMigrationRow(): CheckRow {
+  const legacy = row();
+  delete (legacy as Partial<CheckRow>).battery_12v_pct;
+  return legacy;
+}
+
 describe('buildStatusDocument', () => {
-  it('emits the three fields the fuel producer requires', () => {
-    expect(buildStatusDocument(row())).toEqual({
+  it('emits the three fields the fuel producer requires, and only those, from a bare row', () => {
+    expect(buildStatusDocument(preMigrationRow(), null)).toEqual({
       vehicle: '2020 SANTA FE',
       range_miles: 88,
       reported_at: '2026-09-19T11:04:00.000Z',
@@ -41,7 +74,7 @@ describe('buildStatusDocument', () => {
   });
 
   it('reports the CAR time, never the check time', () => {
-    const document = buildStatusDocument(row());
+    const document = buildStatusDocument(row(), tpms());
     expect(document!.reported_at).toBe('2026-09-19T11:04:00.000Z');
     expect(document!.reported_at).not.toBe('2026-09-22T18:00:09.885Z');
   });
@@ -56,31 +89,127 @@ describe('buildStatusDocument', () => {
     expect([...REQUIRED_STATUS_FIELDS]).toEqual(['vehicle', 'range_miles', 'reported_at']);
   });
 
-  it('emits exactly those keys and nothing else', () => {
-    expect(Object.keys(buildStatusDocument(row())!).sort()).toEqual(
+  it('emits exactly the required keys plus the two optional ones, for a full row', () => {
+    // An exact key SET, not a subset check. The previous version of this
+    // assertion stayed green through the whole battery/TPMS addition only
+    // because its fixture lacked the new column -- a test that pins "nothing
+    // else" against a fixture that cannot produce anything else is pinning the
+    // fixture, not the document.
+    expect(Object.keys(buildStatusDocument(row(), tpms())!).sort()).toEqual(
+      [...REQUIRED_STATUS_FIELDS, 'battery_12v_percent', 'tire_pressure_warning'].sort()
+    );
+  });
+
+  it('emits exactly the required keys and nothing else, for a pre-migration row', () => {
+    // The 3787 production rows written before either field existed. This is
+    // the assertion that makes the boundary either-order: an old row must still
+    // produce a document an old producer can read, with no key it would have to
+    // ignore and no key invented to fill a gap.
+    expect(Object.keys(buildStatusDocument(preMigrationRow(), null)!).sort()).toEqual(
       [...REQUIRED_STATUS_FIELDS].sort()
     );
   });
 
+  it('control: the pre-migration fixture really lacks the battery column', () => {
+    // Without this, the test above passes just as well against a fixture that
+    // has the column -- and would then be asserting the opposite of its name.
+    expect('battery_12v_pct' in preMigrationRow()).toBe(false);
+    expect('battery_12v_pct' in row()).toBe(true);
+  });
+
+  it('omits the battery key independently of the TPMS key, and vice versa', () => {
+    // Two separate sources of absence, so two separate omissions. One guard
+    // covering both would make a car with a battery reading and a failed TPMS
+    // insert publish neither.
+    expect(Object.keys(buildStatusDocument(row(), null)!).sort()).toEqual(
+      [...REQUIRED_STATUS_FIELDS, 'battery_12v_percent'].sort()
+    );
+    expect(Object.keys(buildStatusDocument(preMigrationRow(), tpms())!).sort()).toEqual(
+      [...REQUIRED_STATUS_FIELDS, 'tire_pressure_warning'].sort()
+    );
+  });
+
+  it('reports the battery percentage the row carries', () => {
+    expect(buildStatusDocument(row(), tpms())!.battery_12v_percent).toBe(84);
+  });
+
+  it('emits a reported 0 rather than omitting it', () => {
+    // A flat 12V battery is the single most worth-reporting value this field
+    // ever carries, and it is the one a truthiness guard drops.
+    const document = buildStatusDocument(row({ battery_12v_pct: 0 }), tpms())!;
+    expect(document.battery_12v_percent).toBe(0);
+    expect('battery_12v_percent' in document).toBe(true);
+  });
+
+  it('omits the battery key for an explicit null and for an absent column alike', () => {
+    expect(
+      'battery_12v_percent' in buildStatusDocument(row({ battery_12v_pct: null }), null)!
+    ).toBe(false);
+    expect('battery_12v_percent' in buildStatusDocument(preMigrationRow(), null)!).toBe(false);
+  });
+
+  it('maps each wheel lamp to its own key rather than transposing them', () => {
+    // The fixture lights ONE lamp. An all-off or all-on fixture would pass
+    // under any permutation of the five assignments.
+    expect(buildStatusDocument(row(), tpms())!.tire_pressure_warning).toEqual({
+      front_left: true,
+      front_right: false,
+      rear_left: false,
+      rear_right: false,
+      all: false,
+    });
+    expect(
+      buildStatusDocument(row(), tpms({ front_left: 0, rear_right: 1 }))!.tire_pressure_warning
+    ).toEqual({
+      front_left: false,
+      front_right: false,
+      rear_left: false,
+      rear_right: true,
+      all: false,
+    });
+  });
+
+  it('emits booleans, not the 0/1 integers the column stores', () => {
+    // `core/validation.py` on the hub side 400s a non-bool, and `producer`
+    // sanitises one to None -- so a 1 here costs the tire reading silently.
+    const warning = buildStatusDocument(row(), tpms())!.tire_pressure_warning!;
+    for (const value of Object.values(warning)) {
+      expect(typeof value).toBe('boolean');
+    }
+    expect(Object.keys(warning).sort()).toEqual(
+      ['all', 'front_left', 'front_right', 'rear_left', 'rear_right'].sort()
+    );
+  });
+
+  it('carries the dash master lamp separately from the four wheels', () => {
+    expect(buildStatusDocument(row(), tpms({ all_lamps: 1 }))!.tire_pressure_warning).toEqual({
+      front_left: true,
+      front_right: false,
+      rear_left: false,
+      rear_right: false,
+      all: true,
+    });
+  });
+
   it('returns null when there is no history at all', () => {
-    expect(buildStatusDocument(null)).toBeNull();
+    expect(buildStatusDocument(null, null)).toBeNull();
   });
 
   it('returns null rather than falling back to the check time', () => {
     // Every one of the 3787 pre-upgrade rows has a null car time. Falling back
     // to `ts` would make a car that has not phoned home in a week render as a
     // fresh reading -- the failure this whole column exists to prevent.
-    expect(buildStatusDocument(row({ car_reported_at: null }))).toBeNull();
+    expect(buildStatusDocument(row({ car_reported_at: null }), tpms())).toBeNull();
   });
 
   it('returns null when the car time is blank rather than absent', () => {
-    expect(buildStatusDocument(row({ car_reported_at: '' }))).toBeNull();
+    expect(buildStatusDocument(row({ car_reported_at: '' }), tpms())).toBeNull();
   });
 
   it('passes a fractional range through as a number', () => {
     // The column is REAL and the hub coerces with round(); emitting a string
     // here would be a 400 naming a field that looks right in the log.
-    const document = buildStatusDocument(row({ range_mi: 311.7 }));
+    const document = buildStatusDocument(row({ range_mi: 311.7 }), tpms());
     expect(document!.range_miles).toBe(311.7);
     expect(typeof document!.range_miles).toBe('number');
   });
@@ -111,6 +240,7 @@ describe('statusReport', () => {
       is_fillup: 0,
       odometer_mi: null,
       car_reported_at: '2026-09-19T11:04:00.000Z',
+      battery_12v_pct: null,
     });
     db.close();
 
@@ -124,6 +254,157 @@ describe('statusReport', () => {
       vehicle: '2020 SANTA FE',
       range_miles: 88,
       reported_at: '2026-09-19T11:04:00.000Z',
+    });
+
+    fs.rmSync(dir, { recursive: true });
+  });
+
+  it('takes the tire lamps from the same check as the range, not the newest TPMS row', () => {
+    // The defect this pins: `getLastTpms()` and `getLastCheck()` are two
+    // independent "newest" queries. Here the newest CHECK deliberately has NO
+    // TPMS row, while an earlier check has one with a lamp lit. A document
+    // built from `getLastTpms()` reports this poll's range beside the earlier
+    // poll's tire state, and both halves look equally fresh.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bluelinky-tpms-pairing-'));
+    const dbPath = path.join(dir, 'vehicle-monitor.db');
+    const db = new VehicleDb(dbPath);
+
+    const older = db.insertCheck({
+      ts: '2026-09-22T17:00:09.885Z',
+      vehicle_name: '2020 SANTA FE',
+      range_mi: 95,
+      temp_f: 63.7,
+      is_fillup: 0,
+      odometer_mi: null,
+      car_reported_at: '2026-09-19T10:04:00.000Z',
+      battery_12v_pct: 81,
+    });
+    db.insertTpms({
+      check_id: older,
+      ts: '2026-09-22T17:00:09.885Z',
+      front_left: 1,
+      front_right: 1,
+      rear_left: 1,
+      rear_right: 1,
+      all_lamps: 1,
+    });
+    db.insertCheck({
+      ts: '2026-09-22T18:00:09.885Z',
+      vehicle_name: '2020 SANTA FE',
+      range_mi: 88,
+      temp_f: 63.7,
+      is_fillup: 0,
+      odometer_mi: null,
+      car_reported_at: '2026-09-19T11:04:00.000Z',
+      battery_12v_pct: 84,
+    });
+    db.close();
+
+    const report = statusReport(dbPath);
+    const document = JSON.parse(report.stdout);
+
+    // Control: we really are reading the newer check.
+    expect(document.range_miles).toBe(88);
+    expect(document.battery_12v_percent).toBe(84);
+    // And it has no tire state, rather than borrowing the older check's.
+    expect('tire_pressure_warning' in document).toBe(false);
+
+    fs.rmSync(dir, { recursive: true });
+  });
+
+  it('still reports the range when tpms_readings does not exist at all', () => {
+    // A database from before TPMS existed: `checks` has a usable row and the
+    // other table is simply absent. Looking the TPMS row up unguarded throws
+    // `no such table: tpms_readings` here, and that reached the outer handler
+    // as `unreadable` -- turning a perfectly good range reading into what the
+    // producer can only read as an unreachable car. One optional field must
+    // never be able to cost the required ones.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bluelinky-no-tpms-table-'));
+    const dbPath = path.join(dir, 'vehicle-monitor.db');
+
+    const raw = new Database(dbPath);
+    raw.exec(
+      'CREATE TABLE checks (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL,' +
+        ' vehicle_name TEXT NOT NULL, range_mi REAL NOT NULL, temp_f REAL,' +
+        ' is_fillup INTEGER NOT NULL DEFAULT 0, odometer_mi REAL, car_reported_at TEXT)'
+    );
+    raw
+      .prepare(
+        'INSERT INTO checks (ts, vehicle_name, range_mi, temp_f, is_fillup, odometer_mi,' +
+          " car_reported_at) VALUES ('2026-10-07T21:00:00.000Z', '2020 SANTA FE', 236, 60.7, 0," +
+          " NULL, '2026-10-07T20:24:54.000Z')"
+      )
+      .run();
+    raw.close();
+
+    // Control: the table really is missing, so the assertion below is not
+    // passing against a database that simply has an empty tpms_readings.
+    const probe = new Database(dbPath, { readonly: true });
+    const tables = (
+      probe.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as {
+        name: string;
+      }[]
+    ).map(t => t.name);
+    probe.close();
+    expect(tables).not.toContain('tpms_readings');
+
+    const report = statusReport(dbPath);
+
+    expect(report.stderr).toBe('');
+    expect(report.code).toBe(0);
+    const document = JSON.parse(report.stdout);
+    expect(document.range_miles).toBe(236);
+    expect('tire_pressure_warning' in document).toBe(false);
+
+    fs.rmSync(dir, { recursive: true });
+  });
+
+  it('emits both optional fields end to end for a check written with its TPMS row', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bluelinky-full-'));
+    const dbPath = path.join(dir, 'vehicle-monitor.db');
+    const db = new VehicleDb(dbPath);
+
+    // The writer's own path, so this asserts the round-trip rather than a
+    // hand-built pair of rows the monitor would never produce.
+    db.insertCheckWithTpms(
+      {
+        ts: '2026-09-22T18:00:09.885Z',
+        vehicle_name: '2020 SANTA FE',
+        range_mi: 236,
+        temp_f: 63.7,
+        is_fillup: 0,
+        odometer_mi: null,
+        car_reported_at: '2026-10-07T21:24:54.000Z',
+        battery_12v_pct: 84,
+      },
+      {
+        ts: '2026-09-22T18:00:09.885Z',
+        front_left: 0,
+        front_right: 0,
+        rear_left: 1,
+        rear_right: 0,
+        all_lamps: 0,
+      }
+    );
+    db.close();
+
+    const report = statusReport(dbPath);
+
+    expect(report.code).toBe(0);
+    expect(report.stderr).toBe('');
+    // The exact bytes the spec's D2 wire contract shows, as JSON.
+    expect(JSON.parse(report.stdout)).toEqual({
+      vehicle: '2020 SANTA FE',
+      range_miles: 236,
+      reported_at: '2026-10-07T21:24:54.000Z',
+      battery_12v_percent: 84,
+      tire_pressure_warning: {
+        front_left: false,
+        front_right: false,
+        rear_left: true,
+        rear_right: false,
+        all: false,
+      },
     });
 
     fs.rmSync(dir, { recursive: true });
@@ -181,6 +462,7 @@ describe('the reader never writes', () => {
     );
     after.close();
     expect(columns).not.toContain('car_reported_at');
+    expect(columns).not.toContain('battery_12v_pct');
 
     fs.rmSync(dir, { recursive: true });
   });
@@ -236,6 +518,7 @@ describe('the reader and the writer resolve the same database', () => {
       is_fillup: 0,
       odometer_mi: null,
       car_reported_at: '2026-09-22T16:36:29.000Z',
+      battery_12v_pct: null,
     });
     db.close();
 
