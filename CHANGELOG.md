@@ -1,5 +1,38 @@
 # Changelog
 
+## 2026-10-08
+
+- Move the tracked compose file from `deployment/docker-compose.yml` to the
+  checkout root as `docker-compose.yml`, with root-relative `context: .` and
+  `./.env`. Compose takes the project name — and so the `bluelinky_fuel-state`
+  volume holding the alert state and the SQLite history — from the directory
+  the compose file sits in, which `-f deployment/...` does not change. A
+  `deployment/`-relative deploy mounts an empty `deployment_fuel-state`
+  instead; plexpi has both volumes today, the second one an orphan left by this
+  repo's own old instructions (issue #18).
+- Fix `deployment/README.md`: all five `~/fuelbot` references →
+  `~/bluelinky` (no such directory has ever existed on the box),
+  `origin/master` → `origin/main`, `docker-compose` → `docker compose` (plexpi
+  has the plugin and no v1 binary), and the crontab examples now name
+  `monitor.ts` — the script the tracked crontab actually runs — instead of
+  `monitor-fuel.ts`. Adds the one-time switchover the box needs, because the
+  new tracked `docker-compose.yml` lands on the path an untracked file already
+  occupies and `git pull` refuses to overwrite it.
+- Fix `WHATS_FUEL.md`'s file index, which linked the now-moved
+  `deployment/docker-compose.yml`, and its deploy step, which said
+  `docker-compose up -d`.
+- `TZ=UTC` is a no-op for every timestamp the _monitor_ emits — those all go
+  through `toISOString()` — and a change for `src/logger.ts`, whose winston
+  format renders in local time and so only reaches `cron.log` under
+  `LOG_LEVEL=debug`. It moves those to UTC, which is the direction we want.
+- Point the README's itguy `compose_dir` at `/home/pi/bluelinky` rather than
+  `/home/pi/bluelinky/deployment`.
+- Add `__tests__/deploy-docs.spec.ts`, which fails if the compose file moves
+  back, grows a `../` path, loses `TZ=UTC`, if a deploy command in either
+  README reaches into `deployment/` or invokes `docker-compose`, if
+  `origin/master` returns, if a `fuelbot` checkout path reappears anywhere
+  tracked, or if the documented schedule drifts off the tracked crontab.
+
 ## 2026-09-22
 
 - Add `npm run status-json`: one JSON object (`vehicle`, `range_miles`,

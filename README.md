@@ -41,7 +41,7 @@ itguy deploy bluelinky          # pulls latest code, templates .env, restarts co
 itguy deploy bluelinky --force  # force-recreate (rebuilds image from source)
 ```
 
-Neither of these works on plexpi as of 2026-09-22: there is no itguy config
+Neither of these works on plexpi as of 2026-10-08: there is no itguy config
 file on that box. Use the by-hand recipe below until the itguy block under it
 is real.
 
@@ -53,7 +53,7 @@ Add to `~/.config/itguy/itguy.toml` on plexpi:
 [services.bluelinky]
 tag = "bluelinky"
 strategy = "image-pull"
-compose_dir = "/home/pi/bluelinky/deployment"
+compose_dir = "/home/pi/bluelinky"
 ```
 
 > **The checkout is `/home/pi/bluelinky`, not `/home/pi/fuelbot`.** This block
@@ -61,19 +61,22 @@ compose_dir = "/home/pi/bluelinky/deployment"
 > box. It was copied out of here into a parsons-pulse design memo and became
 > one of the two candidate paths that homelab #498 was sent to go and find.
 >
-> **Nothing on the box is deployed this way today.** Measured 2026-09-22:
-> there is no `~/.config/itguy/itguy.toml` at all, and the running container
-> reports `com.docker.compose.project.working_dir=/home/pi/bluelinky` — it is
-> up from an **untracked** `docker-compose.yml` at the checkout root, not from
-> `deployment/docker-compose.yml`. That root file has `build: context: .` and
-> the same `fuel-state` named volume, so the deploy that actually works is the
-> one under "Deploying by hand" below. The itguy block is kept as intent;
-> reconciling the two is a deploy change, not a docs change.
+> **`compose_dir` is the checkout root, not `deployment/`.** The tracked
+> compose file moved to `/home/pi/bluelinky/docker-compose.yml` in #18, because
+> compose takes the project name — and therefore the `bluelinky_fuel-state`
+> volume that holds the history — from the directory the compose file sits in.
+> `deployment/` gets you project `deployment` and an empty volume. The
+> `deployment/README.md` section "Where the compose file lives" has the
+> measurement.
+>
+> **Nothing on the box is deployed this way today.** Measured 2026-10-08:
+> there is still no `~/.config/itguy/itguy.toml` on plexpi, so the itguy block
+> remains intent. Use "Deploying by hand" below.
 
 ### Deploying by hand (what the box actually does)
 
 ```sh
-cd /home/pi/bluelinky && git pull && docker compose up -d --build
+ssh plexclaude 'cd ~/bluelinky && git pull --ff-only && docker compose up -d --build'
 ```
 
 **`--build` is required, not optional.** The Dockerfile `COPY . .`s the source
