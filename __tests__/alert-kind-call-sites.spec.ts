@@ -19,12 +19,24 @@ import path from 'path';
  * is PR #20's `tsconfig.typecheck.json`; this holds the invariant on `main`
  * until that lands, and keeps holding it for a JS caller afterwards.
  *
- * The vacuous-pass trap is the thing to watch here, and it is the same one
- * `pre-commit-config.spec.ts` documents: "every call site carries a kind" is
- * trivially true of *zero* call sites, so a reformat that defeated the parser
- * would read as a pass. Hence the explicit non-degeneracy assertions below --
- * each file must yield at least as many call sites as it had when this was
- * written, and the parser is proven able to fail on a synthetic negative.
+ * Two traps are guarded explicitly, because the first one alone is not enough
+ * and the review of this file proved it.
+ *
+ * 1. Vacuous pass -- the same trap `pre-commit-config.spec.ts` documents.
+ *    "Every call site carries a kind" is trivially true of *zero* call sites,
+ *    so a reformat that defeated the parser would read as a pass. Hence
+ *    `MIN_CALL_SITES`.
+ * 2. A floor is not a count. `MIN_CALL_SITES` alone passes a *new* call site
+ *    the parser cannot see -- `sendAlert(msg)` with the literal hoisted into a
+ *    const is an ordinary refactor, and it re-opens #19 with nothing red. So
+ *    every `sendAlert(` in the file must also be accounted for by a literal the
+ *    parser read. That equality is what actually holds the invariant.
+ *
+ * Deliberately strict, so a red here may be the guard rather than your code:
+ * the discriminant must be spelled as a *literal* `kind: 'fuel'` or
+ * `kind: 'tpms'`. Shorthand (`kind,`) and a computed value (`kind: someVar`)
+ * both fail, as does a commented-out `sendAlert({ ... })`, which is counted as
+ * a live call site. Prettier's `singleQuote` normalises the quoting for us.
  */
 
 const REPO_ROOT = path.join(__dirname, '..');
@@ -42,7 +54,7 @@ const MIN_CALL_SITES: Record<string, number> = {
  * literal in an argument cannot truncate a call site early and hide a missing
  * `kind` behind a short match.
  */
-export function sendAlertArguments(source: string): string[] {
+function sendAlertArguments(source: string): string[] {
   const found: string[] = [];
   const marker = 'sendAlert({';
   let cursor = source.indexOf(marker);
@@ -58,7 +70,7 @@ export function sendAlertArguments(source: string): string[] {
       }
     }
     found.push(source.slice(cursor + marker.length - 1, index + 1));
-    cursor = source.indexOf(marker, index === source.length ? source.length : index);
+    cursor = source.indexOf(marker, index);
   }
 
   return found;
@@ -91,11 +103,22 @@ describe.each(Object.keys(MIN_CALL_SITES))('%s', filename => {
 
   it('still has at least as many sendAlert call sites as when #19 was fixed', () => {
     // Non-degeneracy control: without this, the kind assertion below passes
-    // vacuously on a file the parser failed to read.
+    // vacuously on a file the parser failed to read at all.
     expect(literals.length).toBeGreaterThanOrEqual(MIN_CALL_SITES[filename]);
   });
 
-  it('passes a kind discriminant at every sendAlert call site', () => {
+  it('accounts for every sendAlert call, not only those spelled sendAlert({', () => {
+    // Completeness control. The floor above cannot see a NEW call site the
+    // parser misses, and `sendAlert(msg)` with the literal hoisted into a const
+    // is an ordinary refactor that re-opens #19. Requiring one parsed literal
+    // per `sendAlert(` is what turns "nothing I read is kind-less" into "no
+    // call site is kind-less". It also catches an unbalanced brace inside a
+    // string, which makes one literal swallow the next.
+    const calls = source.match(/sendAlert\(/g) ?? [];
+    expect(literals.length).toBe(calls.length);
+  });
+
+  it("spells a literal kind: 'fuel' or 'tpms' at every sendAlert call site", () => {
     const kindless = literals.filter(literal => !/\bkind:\s*'(fuel|tpms)'/.test(literal));
     expect(kindless).toEqual([]);
   });

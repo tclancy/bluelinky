@@ -104,14 +104,20 @@ describe('ConsoleAlertBackend dispatch', () => {
 describe('NtfyAlertBackend dispatch', () => {
   const backend = () => new NtfyAlertBackend('https://ntfy.example/fuelbot', 'u', 'p');
   let fetchSpy: jest.SpyInstance;
+  let logSpy: jest.SpyInstance;
 
   beforeEach(() => {
     fetchSpy = jest
       .spyOn(globalThis, 'fetch')
       .mockResolvedValue({ ok: true, status: 200, statusText: 'OK' } as Response);
+    // The backend logs its own success; keep it out of the test output.
+    logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
   });
 
-  afterEach(() => fetchSpy.mockRestore());
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    logSpy.mockRestore();
+  });
 
   it('posts a fuel alert with the fuel title and the range in the body', async () => {
     await backend().sendAlert(fuelAlert);
