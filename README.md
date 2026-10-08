@@ -168,6 +168,13 @@ difference is a document pairing this poll's range with an earlier poll's tire
 state — both halves looking equally fresh. `monitor.ts` now writes the check and
 its TPMS row in one transaction, so that window no longer opens on a crash.
 
+**That transaction changes which thing you lose when the TPMS insert fails.**
+Before, the check row survived and `status-json` still had this hour's range with
+no tire state; now the check rolls back and the command serves last hour's
+reading instead. The pairing is worth it — a mismatched pair reads as fresh and a
+stale pair is dated by `reported_at` — but it is the behaviour to expect when
+debugging a range that stopped moving while the monitor's log looks fine.
+
 One asymmetry worth knowing before you debug the car: if the **monitor** stops
 while the producer keeps running, the newest row stops moving and its
 `car_reported_at` ages past the dashboard's 3-day window. The card will say the

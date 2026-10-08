@@ -54,6 +54,33 @@ function tpms(overrides: Partial<TpmsRow> = {}): TpmsRow {
 }
 
 /**
+ * Every `tpms_readings` column, paired with the document key it must reach.
+ *
+ * One constant, shared by the mapping test and its breadth control, so that
+ * narrowing it narrows both rather than quietly shrinking what the test covers
+ * while the control keeps reporting five.
+ */
+const LAMP_PAIRS = [
+  ['front_left', 'front_left'],
+  ['front_right', 'front_right'],
+  ['rear_left', 'rear_left'],
+  ['rear_right', 'rear_right'],
+  ['all_lamps', 'all'],
+] as const;
+
+/** A TPMS row with exactly `column` lit and every other lamp off. */
+function lampsWith(column: typeof LAMP_PAIRS[number][0]): TpmsRow {
+  return tpms({
+    front_left: 0,
+    front_right: 0,
+    rear_left: 0,
+    rear_right: 0,
+    all_lamps: 0,
+    [column]: 1,
+  });
+}
+
+/**
  * A row as `SELECT *` returns it from a database written before the battery
  * column existed: the key is **absent**, which reads as `undefined` and not as
  * `null`. That distinction is why `buildStatusDocument` cannot use `!== null`.
@@ -101,7 +128,7 @@ describe('buildStatusDocument', () => {
   });
 
   it('emits exactly the required keys and nothing else, for a pre-migration row', () => {
-    // The 3787 production rows written before either field existed. This is
+    // A production row written before either field existed. This is
     // the assertion that makes the boundary either-order: an old row must still
     // produce a document an old producer can read, with no key it would have to
     // ignore and no key invented to fill a gap.
@@ -149,24 +176,33 @@ describe('buildStatusDocument', () => {
   });
 
   it('maps each wheel lamp to its own key rather than transposing them', () => {
-    // The fixture lights ONE lamp. An all-off or all-on fixture would pass
-    // under any permutation of the five assignments.
-    expect(buildStatusDocument(row(), tpms())!.tire_pressure_warning).toEqual({
-      front_left: true,
-      front_right: false,
-      rear_left: false,
-      rear_right: false,
-      all: false,
-    });
-    expect(
-      buildStatusDocument(row(), tpms({ front_left: 0, rear_right: 1 }))!.tire_pressure_warning
-    ).toEqual({
-      front_left: false,
-      front_right: false,
-      rear_left: false,
-      rear_right: true,
-      all: false,
-    });
+    // One lamp lit per case, and **every one of the five lit in some case**.
+    // An all-off or all-on fixture passes under any permutation of the five
+    // assignments; a set of cases that never lights a given lamp is blind to
+    // that lamp alone, and a hardcoded `front_right: false` survived the first
+    // version of this test for exactly that reason.
+    for (const [column, key] of LAMP_PAIRS) {
+      // The whole object, not just the lit key: a dropped lamp and a
+      // transposed pair look identical if you only check the one you lit.
+      expect(buildStatusDocument(row(), lampsWith(column))!.tire_pressure_warning).toEqual(
+        Object.fromEntries(LAMP_PAIRS.map(([, name]) => [name, name === key]))
+      );
+    }
+  });
+
+  it('control: the five cases above light five different lamps, one each', () => {
+    // Reads `LAMP_PAIRS` -- the same constant the loop drives off -- so
+    // narrowing or duplicating an entry there fails here. Without this, a
+    // mapping that pointed two entries at one column would make the loop
+    // assert the same case twice and still pass.
+    const lit = LAMP_PAIRS.map(([column]) =>
+      Object.entries(buildStatusDocument(row(), lampsWith(column))!.tire_pressure_warning!)
+        .filter(([, value]) => value)
+        .map(([name]) => name)
+        .join('+')
+    );
+    expect(lit).toEqual(['front_left', 'front_right', 'rear_left', 'rear_right', 'all']);
+    expect(new Set(lit).size).toBe(LAMP_PAIRS.length);
   });
 
   it('emits booleans, not the 0/1 integers the column stores', () => {

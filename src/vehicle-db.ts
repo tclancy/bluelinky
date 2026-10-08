@@ -38,14 +38,23 @@ export interface CheckRow {
    *
    * Not the traction battery: this car is an ICE Santa Fe and `batSoc` is the
    * accessory battery the starter draws on. Nullable for the same two reasons
-   * as `car_reported_at` — the API may omit it, and the 3787 rows written
-   * before this column existed have nothing to put here.
+   * as `car_reported_at` — the API may omit it, and **every** row written
+   * before this column existed has nothing to put here. (Not "the 3787 rows":
+   * that count belongs to the `car_reported_at` migration in 2026-09, and this
+   * one meets a table that has been growing hourly since.)
    *
    * **Required rather than optional on purpose.** `Omit<CheckRow, 'id'>` is the
    * insert shape, so a required field forces every writer to say what it knows;
    * an optional one lets a call site that forgot the field compile, and the
    * value it would then store is the one reading this column must never carry —
    * a confident number nobody measured.
+   *
+   * That guarantee is only as real as something that checks it, and until
+   * `tsconfig.typecheck.json` existed nothing here did: `tsconfig.json` includes
+   * `src` only, eslint is scoped to `^src/`, rollup's entry never imports this,
+   * and ts-jest runs `isolatedModules`. `npm run typecheck` is what makes the
+   * paragraph above true of `monitor.ts`; `__tests__/typecheck-gate.spec.ts`
+   * pins it to CI.
    *
    * Reading is the asymmetric half: `getLastCheck()` is a `SELECT *` cast, so a
    * row written before the migration yields `undefined` here, not `null`, and

@@ -15,9 +15,12 @@
   TPMS row", which were two different polls whenever the newest check had no
   TPMS row. `monitor.ts` writes the check and its TPMS row in one transaction so
   that window no longer opens on a crash.
-- `status-json` no longer reports `unreadable` for a database whose
-  `tpms_readings` table is missing or corrupt: one optional field cannot cost the
-  required ones.
+- Reading the tire lamps cannot cost the required fields: a missing or corrupt
+  `tpms_readings` omits `tire_pressure_warning` and nothing else. (A design
+  property of the new read, not a fix — the old `status-json` never touched that
+  table.) The failure mode it does change: a `tpms_readings` insert that fails
+  now rolls its check back, so `status-json` serves the previous hour's range
+  rather than this hour's range with no tire state.
 
 ## 2026-09-22
 

@@ -135,6 +135,13 @@ export function buildStatusDocument(
  * state and nothing else — letting it reach the outer handler would turn a good
  * range reading into `unreadable`, which the producer can only read as an
  * unreachable car. A failure reading `checks` is not caught here and still does.
+ *
+ * **Deliberately silent, and that is a real cost.** `src/` is under
+ * `no-console: error`, so there is no outlet here, and a persistently corrupt
+ * `tpms_readings` is indistinguishable from a check that simply has no TPMS row:
+ * `tire_pressure_warning` is absent from an otherwise healthy document, forever,
+ * with no signal anywhere. If the fridge card stops showing tire state while the
+ * range keeps updating, this `catch` is the first place to look.
  */
 function tpmsFor(db: VehicleDb, check: CheckRow | null): TpmsRow | null {
   if (check?.id === undefined) {
