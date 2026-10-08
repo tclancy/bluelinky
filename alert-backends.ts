@@ -34,6 +34,21 @@ function formatWheels(wheels: string[]): string {
 }
 
 /**
+ * Refuse a message whose `kind` is neither of the two we know.
+ *
+ * The `never` parameter is the load-bearing part: it makes a backend that
+ * forgets to handle a newly added member of `AlertMessage` a *compile* error at
+ * the call site, rather than a message that silently takes the last branch. The
+ * runtime throw covers the JS caller the type system cannot reach -- which is
+ * exactly what #19 was, three `sendAlert` calls with no `kind` at all taking the
+ * TPMS arm and then dying inside `formatWheels(undefined)`.
+ */
+function refuseUnknownAlertKind(message: never): never {
+  const kind = (message as { kind?: unknown }).kind;
+  throw new Error(`Unknown alert kind: ${kind === undefined ? '(missing)' : String(kind)}`);
+}
+
+/**
  * Console Backend - for development/testing
  */
 export class ConsoleAlertBackend implements AlertBackend {
@@ -48,13 +63,15 @@ export class ConsoleAlertBackend implements AlertBackend {
       console.log(`Vehicle: ${message.vehicleName}`);
       console.log(`Range: ${message.range} miles remaining`);
       console.log(`Time: ${message.timestamp.toISOString()}\n`);
-    } else {
+    } else if (message.kind === 'tpms') {
       const title =
         message.severity === 'critical' ? 'CRITICAL: TPMS Warning' : 'Tire Pressure Warning';
       console.log(`\n[ALERT] ${title}`);
       console.log(`Vehicle: ${message.vehicleName}`);
       console.log(`Wheels: ${formatWheels(message.wheels)}`);
       console.log(`Time: ${message.timestamp.toISOString()}\n`);
+    } else {
+      refuseUnknownAlertKind(message);
     }
   }
 }
@@ -90,11 +107,13 @@ export class NtfyAlertBackend implements AlertBackend {
       title = isCritical ? 'CRITICAL: Get gas now!' : 'Low Fuel Warning';
       body = `${message.vehicleName} has ${message.range} miles of range remaining.`;
       priority = isCritical ? '5' : '4';
-    } else {
+    } else if (message.kind === 'tpms') {
       const isCritical = message.severity === 'critical';
       title = isCritical ? 'CRITICAL: Tire Pressure Warning' : 'Tire Pressure Warning';
       body = `${message.vehicleName}: low pressure on ${formatWheels(message.wheels)}.`;
       priority = isCritical ? '5' : '3';
+    } else {
+      refuseUnknownAlertKind(message);
     }
 
     const response = await fetch(this.url, {

@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-10-07
+
+- Fix `monitor-fuel.ts`: its three `sendAlert` calls omitted the `kind`
+  discriminant, so `alert-backends.ts` took its TPMS arm and every fuel alert
+  rendered as `Tire Pressure Warning` before throwing in
+  `formatWheels(undefined)`. Not reachable from the deployed entry point --
+  `deployment/crontab` and `entrypoint.sh` both run `monitor.ts`, which passes
+  `kind` everywhere -- but `deployment/README.md` documents `monitor-fuel.ts` as
+  a live invocation, so anyone following the docs hit it (issue #19).
+- Both alert backends now dispatch on an explicit `kind === 'tpms'` and refuse
+  anything else with `Unknown alert kind: <kind>`. The old `else`-is-TPMS arm
+  was reached by _any_ non-`'fuel'` message: one carrying `wheels` rendered
+  silently as a tire alert, which no crash protected against. The refusal takes
+  a `never`, so a future member of `AlertMessage` that a backend forgets to
+  handle is a compile error at the call site rather than a wrong notification.
+
 ## 2026-09-22
 
 - Add `npm run status-json`: one JSON object (`vehicle`, `range_miles`,
