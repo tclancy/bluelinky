@@ -117,6 +117,7 @@ async function monitorFuel() {
         const testRange = testSeverity === 'critical' ? 10 : 45;
 
         await alertBackend.sendAlert({
+          kind: 'fuel',
           severity: testSeverity,
           range: testRange,
           vehicleName: vehicle.name(),
@@ -140,6 +141,7 @@ async function monitorFuel() {
       // LOGIC: Check 15-mile critical threshold
       if (currentRange <= THRESHOLD_CRITICAL && !state.alert15Sent) {
         await alertBackend.sendAlert({
+          kind: 'fuel',
           severity: 'critical',
           range: currentRange,
           vehicleName: vehicle.name(),
@@ -155,6 +157,7 @@ async function monitorFuel() {
         !state.alert50Sent
       ) {
         await alertBackend.sendAlert({
+          kind: 'fuel',
           severity: 'low',
           range: currentRange,
           vehicleName: vehicle.name(),
