@@ -1,0 +1,51 @@
+# Lives at the checkout root on purpose, and moving it back breaks the deploy.
+#
+# Compose derives the project name from the directory holding THIS FILE, not
+# from the directory you invoke it in -- so `docker compose -f
+# deployment/docker-compose.yml up` from ~/bluelinky is project `deployment`,
+# not project `bluelinky`, and it mounts `deployment_fuel-state` instead of the
+# `bluelinky_fuel-state` volume that holds the alert state and the SQLite
+# history. Both volumes exist on plexpi today, the second one empty. See issue
+# #18, `deployment/README.md` ("Where the compose file lives") and
+# `__tests__/deploy-docs.spec.ts`.
+services:
+  fuel-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bluelinky-fuel-monitor
+    restart: unless-stopped
+
+    # Mount .env from the checkout root, beside this file
+    volumes:
+      - ./.env:/app/.env:ro
+      - fuel-state:/app/state
+
+    # Keep container running
+    stdin_open: true
+    tty: true
+
+    environment:
+      # UTC everywhere (house rule). Safe here, not merely preferred: every
+      # timestamp the MONITOR emits goes through toISOString(), the crontab's
+      # `0 * * * *` fires at the same instants under either zone, and the US
+      # code path hardcodes its API `offset` header rather than reading TZ.
+      # It is also strictly better across a DST change, where a US zone makes
+      # `0 * * * *` fire 23 times in March and 25 in November.
+      #
+      # Not a no-op for src/logger.ts: winston's `YYYY-MM-DD HH:mm:ss` renders
+      # in LOCAL time, so under LOG_LEVEL=debug this moves cron.log's bracketed
+      # stamps from ET to UTC -- which is the direction we want, since the ISO
+      # timestamps beside them were already UTC.
+      - TZ=UTC
+
+    # Optional: Healthcheck to ensure container is working
+    healthcheck:
+      test: ['CMD', 'test', '-f', '/var/log/fuel-monitor/cron.log']
+      interval: 5m
+      timeout: 10s
+      retries: 3
+
+volumes:
+  # Persist only the alert state directory, not all of /app
+  fuel-state:

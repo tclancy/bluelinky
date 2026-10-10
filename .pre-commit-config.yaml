@@ -19,6 +19,13 @@ repos:
       - id: end-of-file-fixer
       - id: check-yaml
       - id: check-json
+        # TypeScript's config format is JSONC -- `tsc -p` accepts `//` comments
+        # and `tsconfig.typecheck.json` uses them to record why its `include` is
+        # narrow. `check-json` is a strict-JSON validator and rejects them.
+        # Nothing is lost: `npm run typecheck` and `npm run build` both parse
+        # these files with TypeScript's own reader, which is a stricter check of
+        # the thing that matters than a syntax pass would be.
+        exclude: ^tsconfig.*\.json$
       - id: check-merge-conflict
   - repo: local
     hooks:
@@ -29,6 +36,15 @@ repos:
         files: ^src/
         types_or: [javascript, jsx, ts, tsx]
         pass_filenames: true
+      - id: typecheck
+        name: Typecheck (tsc)
+        language: system
+        # pass_filenames: false -- tsc takes a project, and a type error in one
+        # file is usually introduced by an edit to another. Passing only the
+        # staged paths would make the gate miss exactly that case.
+        entry: npx tsc -p tsconfig.typecheck.json
+        pass_filenames: false
+        files: \.ts$
       - id: prettier
         name: Prettier
         language: system

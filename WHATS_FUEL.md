@@ -82,7 +82,9 @@ We now have automated scheduled monitoring via Docker and cron!
 **What We Built:**
 
 - [Dockerfile](Dockerfile) - Self-contained container with Node.js, npm, and cron
-- [deployment/docker-compose.yml](deployment/docker-compose.yml) - Easy container management
+- [docker-compose.yml](docker-compose.yml) - Easy container management (moved to the
+  checkout root in #18; compose takes the project name, and so the state volume,
+  from the directory the file sits in)
 - [deployment/crontab](deployment/crontab) - Hourly fuel check schedule
 - [deployment/entrypoint.sh](deployment/entrypoint.sh) - Container startup script with validation
 - [deployment/README.md](deployment/README.md) - Complete deployment guide
@@ -102,7 +104,7 @@ We now have automated scheduled monitoring via Docker and cron!
 
 1. Copy files to Linux server
 2. Create .env with credentials
-3. Run `docker-compose up -d`
+3. Run `docker compose up -d --build` from the checkout root
 4. Monitor logs with `docker logs -f bluelinky-fuel-monitor`
 
 ---

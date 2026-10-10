@@ -6,10 +6,16 @@ This deployment uses Docker to create a completely self-contained fuel monitorin
 
 On your Linux server, you only need:
 
-- Docker
-- docker-compose (optional, but recommended)
+- Docker Engine 20.10+
+- The `docker compose` plugin (v2 or newer)
 
-That's it! Everything else (Node.js, npm packages, cron) runs inside the container.
+That's it! Everything else (Node.js, npm packages, cron) runs inside the
+container.
+
+**`docker compose`, never `docker-compose`.** plexpi has the plugin
+(`v5.1.3`, measured 2026-10-08) and no hyphenated v1 binary at all, so every
+`docker-compose ...` line is a `command not found` on the only box this is
+deployed to.
 
 ## Deployed Instance (plexpi)
 
@@ -19,6 +25,12 @@ That's it! Everything else (Node.js, npm packages, cron) runs inside the contain
 - Alert Backend: T-Mobile Email-to-SMS
 - Schedule: Every hour at :00
 - SSH alias: `plexclaude`
+- Checkout: `~/bluelinky` (i.e. `/home/pi/bluelinky`)
+- Compose file: `~/bluelinky/docker-compose.yml` — the tracked one at the
+  **checkout root**, not under `deployment/`. See "Where the compose file
+  lives" below, including the **one-time switchover** needed the first time you
+  pull this: until 2026-10-08 that path held an _untracked_ file, and `git pull`
+  refuses to overwrite it.
 
 ### Quick Reference Commands
 
@@ -34,48 +46,134 @@ ssh plexclaude "docker logs -f bluelinky-fuel-monitor"
 ssh plexclaude "docker exec bluelinky-fuel-monitor cat /var/log/fuel-monitor/cron.log"
 ```
 
-**Manual test run:**
+**Manual test run** — same script the schedule runs (fuel + TPMS + history):
 
 ```bash
-ssh plexclaude "docker exec bluelinky-fuel-monitor sh -c 'cd /app && export \$(grep -v \"^#\" .env | xargs) && npx tsx monitor-fuel.ts'"
+ssh plexclaude "docker exec bluelinky-fuel-monitor sh -c 'cd /app && export \$(grep -v \"^#\" .env | xargs) && npx tsx monitor.ts'"
 ```
+
+The `export` is needed here and not in the crontab: `docker exec` does not read
+`/etc/environment`. Swap `monitor.ts` for `monitor-fuel.ts` for the older
+fuel-only check, which writes no history row.
 
 **Restart container:**
 
 ```bash
-ssh plexclaude "cd ~/fuelbot/deployment && docker compose restart"
+ssh plexclaude "cd ~/bluelinky && docker compose restart"
 ```
+
+`restart` re-runs the **image that is already built**. The Dockerfile `COPY . .`s
+the source in, so after a `git pull` you want the rebuild below instead.
 
 **Rebuild and restart:**
 
 ```bash
-ssh plexclaude "cd ~/fuelbot/deployment && docker compose down && docker compose up -d --build"
+ssh plexclaude "cd ~/bluelinky && git pull --ff-only && docker compose up -d --build"
 ```
+
+## Where the compose file lives (and why it matters)
+
+The tracked compose file is `docker-compose.yml` at the **checkout root**, and
+it is deliberately not under `deployment/`.
+
+Compose derives the **project name** from the directory containing the compose
+file, not from the directory you run the command in. The project name prefixes
+every named volume. So:
+
+| compose file                                | project      | state volume            |
+| ------------------------------------------- | ------------ | ----------------------- |
+| `~/bluelinky/docker-compose.yml`            | `bluelinky`  | `bluelinky_fuel-state`  |
+| `~/bluelinky/deployment/docker-compose.yml` | `deployment` | `deployment_fuel-state` |
+
+The second row holds even when you invoke it from the checkout root as
+`docker compose -f deployment/docker-compose.yml up` — the `-f` path moves the
+project directory with it. Measured on compose v5.1.2.
+
+`bluelinky_fuel-state` is the volume the running container is mounted from; it
+holds the alert state and the SQLite history (`checks`, `tpms_readings`,
+`alerts`). Deploying from a `deployment/`-relative compose file does not merely
+look different — it mounts a **different, empty** volume, so the car's history
+and the "already alerted at 15%" state silently start over.
+
+What "reaches for" means depends on whether the old container is still
+there. Measured against a container already up under project `bluelinky`,
+`docker compose up -d` from `deployment/` creates `deployment_fuel-state` and
+then **fails** on the `container_name` conflict, leaving the running container
+alone. Remove the container first and the same command comes up on the empty
+volume with no complaint. So: loud and harmless, or silent and lossy, depending
+on the order.
+
+`docker volume ls` on plexpi lists **both** `bluelinky_fuel-state` and
+`deployment_fuel-state` today, the second one empty — which is the first of
+those two outcomes, fossilised. Something once ran compose from inside
+`deployment/` here. The volume is measured; the exact command that made it is a
+guess.
+
+### One-time switchover (Tom, once, after this merges)
+
+**`git pull` will refuse until the untracked file is gone.** The box runs from
+an **untracked** `~/bluelinky/docker-compose.yml` at this very path, and this
+change adds a tracked file there, so git aborts rather than overwrite it:
+
+```
+error: The following untracked working tree files would be overwritten by merge:
+	docker-compose.yml
+Please move or remove them before you merge.
+```
+
+So, once:
+
+```bash
+ssh plexclaude
+cd ~/bluelinky
+# Confirm the tracked file is the one you want (expect: context/.env paths and TZ)
+git fetch origin && git diff origin/main:docker-compose.yml docker-compose.yml
+mv docker-compose.yml /tmp/docker-compose.yml.untracked-backup
+git pull --ff-only && docker compose up -d --build
+# The container must still be in project `bluelinky`, on the volume with the history
+docker inspect bluelinky-fuel-monitor \
+  --format '{{index .Config.Labels "com.docker.compose.project"}}'
+docker inspect bluelinky-fuel-monitor --format '{{range .Mounts}}{{println .Name}}{{end}}'
+```
+
+Expect `bluelinky` and `bluelinky_fuel-state`. If either reads `deployment`,
+stop — the history is not mounted. Nothing in a repo can see an untracked file
+on a remote box, so no test here can catch this; it is a one-time step.
+
+Keeping the file at the root also means the deploy needs no `-f` flag and no
+second `cd`: it runs from the directory you just `git pull`ed. There is nothing
+to remember and nothing to get wrong.
+
+`__tests__/deploy-docs.spec.ts` fails if the compose file moves back, if it
+grows a `../` path, if a deploy command in this file names `deployment`, or if
+a retired `fuelbot` checkout path reappears anywhere tracked.
 
 ## Initial Setup
 
 ### 1. Clone Repository to Server
 
-Clone the fuelbot repository to your Linux server:
+Clone the repository to your Linux server. **Keep the default directory name**
+— `bluelinky` — because the compose project name, and therefore the name of the
+state volume, is derived from it (see "Where the compose file lives"):
 
 ```bash
 # On the server
 cd ~
-git clone git@github.com:tclancy/bluelinky.git fuelbot
-cd fuelbot
+git clone git@github.com:tclancy/bluelinky.git
+cd bluelinky
 ```
 
 Alternatively, if you don't have SSH access to GitHub from the server:
 
 ```bash
 # From your local machine
-scp -r /path/to/fuelbot user@server:/home/user/fuelbot
+scp -r /path/to/bluelinky user@server:/home/user/bluelinky
 # Then on the server, set up git:
-cd ~/fuelbot
+cd ~/bluelinky
 git init
 git remote add origin git@github.com:tclancy/bluelinky.git
 git fetch origin
-git reset --hard origin/master
+git reset --hard origin/main
 ```
 
 ### 2. Create .env File
@@ -83,7 +181,7 @@ git reset --hard origin/master
 Create a `.env` file in the bluelinky directory with your credentials:
 
 ```bash
-cd ~/fuelbot
+cd ~/bluelinky
 cp .env.example .env
 nano .env  # or vim, or any editor
 ```
@@ -118,11 +216,12 @@ AWS_SECRET_ACCESS_KEY=your_secret_access_key
 
 ### 3. Build and Start the Container
 
-Using docker-compose (recommended):
+Using compose (recommended) — from the **checkout root**, where the compose
+file lives:
 
 ```bash
-cd deployment
-docker-compose up -d
+cd ~/bluelinky
+docker compose up -d --build
 ```
 
 Or using docker directly:
@@ -169,22 +268,31 @@ By default, the fuel check runs **every hour at :00** (e.g., 1:00, 2:00, 3:00).
 
 To change the schedule, edit `deployment/crontab`:
 
+The scheduled job is `monitor.ts` — fuel **and** TPMS **and** the SQLite
+history in one run. (`monitor-fuel.ts` is the older fuel-only script; it is
+still there for a manual one-off, but nothing schedules it.) No `export` line
+is needed: `entrypoint.sh` writes `/app/.env` into `/etc/environment`, which
+cron reads.
+
 ```bash
 # Run every 2 hours
-0 */2 * * * cd /app && export $(grep -v '^#' .env | xargs) && npx tsx monitor-fuel.ts >> /var/log/fuel-monitor/cron.log 2>&1
+0 */2 * * * cd /app && npx tsx monitor.ts >> /var/log/fuel-monitor/cron.log 2>&1
 
 # Run twice daily (6am and 6pm UTC)
-0 6,18 * * * cd /app && export $(grep -v '^#' .env | xargs) && npx tsx monitor-fuel.ts >> /var/log/fuel-monitor/cron.log 2>&1
+0 6,18 * * * cd /app && npx tsx monitor.ts >> /var/log/fuel-monitor/cron.log 2>&1
 
 # Run every 30 minutes
-*/30 * * * * cd /app && export $(grep -v '^#' .env | xargs) && npx tsx monitor-fuel.ts >> /var/log/fuel-monitor/cron.log 2>&1
+*/30 * * * * cd /app && npx tsx monitor.ts >> /var/log/fuel-monitor/cron.log 2>&1
 ```
 
-After changing the crontab, rebuild and restart:
+Times are **UTC**: the container sets `TZ=UTC` in `docker-compose.yml`.
+
+After changing the crontab, rebuild and restart — the crontab is `COPY`d into
+the image, so a plain `restart` keeps the old schedule:
 
 ```bash
-docker-compose down
-docker-compose up -d --build
+cd ~/bluelinky
+docker compose up -d --build
 ```
 
 ## Testing
@@ -222,35 +330,43 @@ When code changes are committed to the repository:
 
 ```bash
 # On the server
-cd ~/fuelbot
-git pull origin master
-
-# Rebuild and restart the container
-cd deployment
-docker compose down
-docker compose up -d --build
+ssh plexclaude
+cd ~/bluelinky && git pull --ff-only && docker compose up -d --build
 ```
+
+Or in one line from your laptop:
+
+```bash
+ssh plexclaude 'cd ~/bluelinky && git pull --ff-only && docker compose up -d --build'
+```
+
+**`--build` is required, not optional.** The Dockerfile `COPY . .`s the source
+into the image, so `docker compose restart` re-runs the old code with a
+straight face. The named volume `bluelinky_fuel-state` survives the recreate,
+which is what keeps the alert state and the history.
 
 **Note:** The `.env` file is gitignored, so your credentials are safe during updates.
 
 ## Stopping the Monitor
 
+All from `~/bluelinky`.
+
 Temporary stop (preserves state):
 
 ```bash
-docker-compose stop
+docker compose stop
 ```
 
 Permanent removal (preserves state volume):
 
 ```bash
-docker-compose down
+docker compose down
 ```
 
 Complete removal (destroys state):
 
 ```bash
-docker-compose down -v
+docker compose down -v
 ```
 
 ## AWS SNS Setup (Recommended)
@@ -374,7 +490,7 @@ docker exec bluelinky-fuel-monitor /bin/bash -c 'echo "{\"alert50Sent\":false,\"
 **Host system needs:**
 
 - Docker Engine 20.10+
-- docker-compose 1.29+ (optional)
+- The `docker compose` plugin (v2+); the hyphenated v1 binary is not used
 - ~500MB disk space for container and images
 - Internet connection for Bluelink API and Twilio API
 

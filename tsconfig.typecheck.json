@@ -1,0 +1,22 @@
+{
+  // `tsconfig.json` has `"include": ["src"]`, so `tsc` has never looked at the
+  // root-level entry points -- and nothing else does either: `npm run lint`
+  // scopes to `^src/`, rollup's entry is `src/index.ts` and reaches none of
+  // them, and `jest.config.cjs` sets ts-jest `isolatedModules: true`, which is
+  // transpile-only. So a type error in `monitor.ts` passed every gate in this
+  // repo, and the type-based guarantees `src/vehicle-db.ts` documents -- a
+  // required `CheckRow` field forces a writer to supply it -- could not fire
+  // against the one production writer. This config is what makes them fire.
+  //
+  // Narrow on purpose. Four other root files are NOT here:
+  //   monitor-fuel.ts  -- three real pre-existing errors, see issue #19
+  //   debug.ts, get-fuel-level.ts, __tests__/  -- ~12 more, separate work
+  // Widening this is a follow-up, not a drive-by: a config that cannot pass
+  // today would be a permanently red gate, which is the same non-gate as none.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "allowImportingTsExtensions": true
+  },
+  "include": ["src", "monitor.ts", "status-json.ts", "alert-backends.ts"]
+}

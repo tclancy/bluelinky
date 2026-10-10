@@ -26,7 +26,7 @@ import BlueLinky from './src/index.ts';
 import * as fs from 'fs';
 import * as path from 'path';
 import { createAlertBackend, AlertBackend } from './alert-backends.ts';
-import { VehicleDb, defaultDbPath } from './src/vehicle-db.ts';
+import { VehicleDb, batteryPctOrNull, defaultDbPath } from './src/vehicle-db.ts';
 import {
   checkRowFrom,
   fetchOutdoorTempF,
@@ -194,6 +194,8 @@ async function monitor(): Promise<void> {
       console.log(`Current Range: ${currentRange} miles`);
       console.log(`Previous Range: ${state.lastRange} miles`);
       console.log(`Temperature: ${tempF !== null ? `${tempF}°F` : 'unavailable'}`);
+      const battery12v = batteryPctOrNull(status.engine.batteryCharge12v);
+      console.log(`12V Battery: ${battery12v !== null ? `${battery12v}%` : 'unavailable'}`);
       console.log(
         `TPMS: FL=${tpmsLamps.frontLeft} FR=${tpmsLamps.frontRight} RL=${tpmsLamps.rearLeft} RR=${tpmsLamps.rearRight} ALL=${tpmsLamps.all}\n`
       );
@@ -219,7 +221,10 @@ async function monitor(): Promise<void> {
       }
 
       // ── Write check to DB ──────────────────────────────────────────────────
-      const checkId = db.insertCheck(
+      // One transaction, not two statements. `src/status-json.ts` reads the
+      // TPMS row BY the newest check's id, so a crash between the two inserts
+      // would publish a document claiming this car reports no tire lamps.
+      db.insertCheckWithTpms(
         checkRowFrom({
           ts,
           vehicleName,
@@ -231,18 +236,17 @@ async function monitor(): Promise<void> {
           // car last spoke to Hyundai. A parked car keeps answering with a
           // days-old reading, and only that field can say so.
           lastupdate: status.lastupdate,
-        })
+          batteryCharge12v: status.engine.batteryCharge12v,
+        }),
+        {
+          ts,
+          front_left: tpmsLamps.frontLeft ? 1 : 0,
+          front_right: tpmsLamps.frontRight ? 1 : 0,
+          rear_left: tpmsLamps.rearLeft ? 1 : 0,
+          rear_right: tpmsLamps.rearRight ? 1 : 0,
+          all_lamps: tpmsLamps.all ? 1 : 0,
+        }
       );
-
-      db.insertTpms({
-        check_id: checkId,
-        ts,
-        front_left: tpmsLamps.frontLeft ? 1 : 0,
-        front_right: tpmsLamps.frontRight ? 1 : 0,
-        rear_left: tpmsLamps.rearLeft ? 1 : 0,
-        rear_right: tpmsLamps.rearRight ? 1 : 0,
-        all_lamps: tpmsLamps.all ? 1 : 0,
-      });
 
       // ── Fuel alerts ────────────────────────────────────────────────────────
       if (currentRange > FUEL_THRESHOLD_LOW) {

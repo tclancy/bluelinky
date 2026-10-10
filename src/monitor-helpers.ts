@@ -4,7 +4,7 @@
  * the credential validation side effects in monitor.ts.
  */
 
-import type { CheckRow as CheckRowShape } from './vehicle-db';
+import { batteryPctOrNull, type CheckRow as CheckRowShape } from './vehicle-db';
 
 /** The insertable shape of a `checks` row (no `id` until SQLite assigns one). */
 type CheckRow = Omit<CheckRowShape, 'id'>;
@@ -106,6 +106,12 @@ export function carReportedAt(lastupdate: unknown): string | null {
  * only one of them answers "when did the car last report". Inside `monitor.ts`
  * that assignment sits in an async Bluelink callback and no test can reach it;
  * here it is six lines that one can.
+ *
+ * `batteryCharge12v` is `unknown` for the same reason `lastupdate` is: it is
+ * declared `number | undefined` on `VehicleStatus` but reached through an
+ * `as VehicleStatus` cast over a vendor parser, so the declared type is a claim
+ * about someone else's code. `batteryPctOrNull` is the rule, and it lives on
+ * the column.
  */
 export function checkRowFrom(run: {
   ts: string;
@@ -115,6 +121,7 @@ export function checkRowFrom(run: {
   isFillup: boolean;
   odometerMi: number | null;
   lastupdate: unknown;
+  batteryCharge12v: unknown;
 }): CheckRow {
   return {
     ts: run.ts,
@@ -124,5 +131,6 @@ export function checkRowFrom(run: {
     is_fillup: run.isFillup ? 1 : 0,
     odometer_mi: run.odometerMi,
     car_reported_at: carReportedAt(run.lastupdate),
+    battery_12v_pct: batteryPctOrNull(run.batteryCharge12v),
   };
 }

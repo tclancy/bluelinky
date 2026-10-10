@@ -17,6 +17,12 @@ jobs:
       - run: npm ci
       - name: ESLint
         run: npm run lint
+      - name: Typecheck
+        # Covers the root-level entry points `tsconfig.json`'s `include: [src]`
+        # has never reached. Without it no gate in this repo checks a single
+        # TypeScript claim about `monitor.ts`: eslint is scoped to `^src/`,
+        # rollup's entry never imports it, and ts-jest runs `isolatedModules`.
+        run: npm run typecheck
       - name: Prettier
         run: npx prettier --check './src/**/*.{js,jsx,ts,tsx}' './__tests__/**/*.{js,jsx,ts,tsx}' './*.ts'
   test:

@@ -41,7 +41,7 @@ itguy deploy bluelinky          # pulls latest code, templates .env, restarts co
 itguy deploy bluelinky --force  # force-recreate (rebuilds image from source)
 ```
 
-Neither of these works on plexpi as of 2026-09-22: there is no itguy config
+Neither of these works on plexpi as of 2026-10-08: there is no itguy config
 file on that box. Use the by-hand recipe below until the itguy block under it
 is real.
 
@@ -53,7 +53,7 @@ Add to `~/.config/itguy/itguy.toml` on plexpi:
 [services.bluelinky]
 tag = "bluelinky"
 strategy = "image-pull"
-compose_dir = "/home/pi/bluelinky/deployment"
+compose_dir = "/home/pi/bluelinky"
 ```
 
 > **The checkout is `/home/pi/bluelinky`, not `/home/pi/fuelbot`.** This block
@@ -61,19 +61,22 @@ compose_dir = "/home/pi/bluelinky/deployment"
 > box. It was copied out of here into a parsons-pulse design memo and became
 > one of the two candidate paths that homelab #498 was sent to go and find.
 >
-> **Nothing on the box is deployed this way today.** Measured 2026-09-22:
-> there is no `~/.config/itguy/itguy.toml` at all, and the running container
-> reports `com.docker.compose.project.working_dir=/home/pi/bluelinky` — it is
-> up from an **untracked** `docker-compose.yml` at the checkout root, not from
-> `deployment/docker-compose.yml`. That root file has `build: context: .` and
-> the same `fuel-state` named volume, so the deploy that actually works is the
-> one under "Deploying by hand" below. The itguy block is kept as intent;
-> reconciling the two is a deploy change, not a docs change.
+> **`compose_dir` is the checkout root, not `deployment/`.** The tracked
+> compose file moved to `/home/pi/bluelinky/docker-compose.yml` in #18, because
+> compose takes the project name — and therefore the `bluelinky_fuel-state`
+> volume that holds the history — from the directory the compose file sits in.
+> `deployment/` gets you project `deployment` and an empty volume. The
+> `deployment/README.md` section "Where the compose file lives" has the
+> measurement.
+>
+> **Nothing on the box is deployed this way today.** Measured 2026-10-08:
+> there is still no `~/.config/itguy/itguy.toml` on plexpi, so the itguy block
+> remains intent. Use "Deploying by hand" below.
 
 ### Deploying by hand (what the box actually does)
 
 ```sh
-cd /home/pi/bluelinky && git pull && docker compose up -d --build
+ssh plexclaude 'cd ~/bluelinky && git pull --ff-only && docker compose up -d --build'
 ```
 
 **`--build` is required, not optional.** The Dockerfile `COPY . .`s the source
@@ -85,7 +88,7 @@ which is what keeps the history.
 
 ```sh
 npm run --silent status-json
-{"vehicle":"2020 SANTA FE","range_miles":88,"reported_at":"2026-09-22T16:36:29.000Z"}
+{"vehicle":"2020 SANTA FE","range_miles":236,"reported_at":"2026-10-07T21:24:54.000Z","battery_12v_percent":84,"tire_pressure_warning":{"front_left":false,"front_right":false,"rear_left":false,"rear_right":false,"all":false}}
 ```
 
 One JSON object on stdout, for
@@ -132,6 +135,48 @@ runs a check on container start, so after a rebuild a usable row lands
 immediately rather than at the next `:00` — but until one does, the command
 exits 1, which the producer reads as an unreachable car rather than a healthy
 tick.
+
+### The two optional fields
+
+`vehicle`, `range_miles` and `reported_at` are the three the producer requires;
+a missing one is indistinguishable, there, from a car it could not reach.
+`battery_12v_percent` and `tire_pressure_warning` are **optional, and omitted
+rather than nulled** when the newest check has no value for them. The producer
+picks fields by name, so an old producer ignores a new key and a new producer
+reads an absent key as `None` — which is what makes this boundary deployable in
+either order.
+
+| Key                     | Source                                                                         | Omitted when                                                  |
+| ----------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------- |
+| `battery_12v_percent`   | `checks.battery_12v_pct` ← `status.engine.batteryCharge12v` (`battery.batSoc`) | the column is absent (pre-migration row) or the value is null |
+| `tire_pressure_warning` | the `tpms_readings` row whose `check_id` is that check                         | that check has no TPMS row                                    |
+
+Two things it is worth not mistaking:
+
+- **It is the 12V starter battery, not a traction battery.** The car is an ICE
+  Santa Fe; `batSoc` is the accessory battery the starter draws on.
+- **The tire fields are lamps, not pressures.** A `refresh: false` status carries
+  no PSI or kPa of any kind — only the five `tirePressureLamp` flags — and `all`
+  is plausibly the dash master lamp rather than "all four are low", so nothing
+  here should be rendered as a per-wheel pressure or as a claim about all four.
+  `oil` is absent from the response entirely.
+
+A `0` battery reading is **emitted, not omitted.** A flat 12V is the single most
+worth-reporting value this field carries, and it is the one a truthiness guard
+drops.
+
+The tire lamps are read **by** the newest check's id, never as "the newest TPMS
+row". The two differ exactly when the newest check has no TPMS row, and the
+difference is a document pairing this poll's range with an earlier poll's tire
+state — both halves looking equally fresh. `monitor.ts` now writes the check and
+its TPMS row in one transaction, so that window no longer opens on a crash.
+
+**That transaction changes which thing you lose when the TPMS insert fails.**
+Before, the check row survived and `status-json` still had this hour's range with
+no tire state; now the check rolls back and the command serves last hour's
+reading instead. The pairing is worth it — a mismatched pair reads as fresh and a
+stale pair is dated by `reported_at` — but it is the behaviour to expect when
+debugging a range that stopped moving while the monitor's log looks fine.
 
 One asymmetry worth knowing before you debug the car: if the **monitor** stops
 while the producer keeps running, the newest row stops moving and its
