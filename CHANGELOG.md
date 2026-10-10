@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-10-07
+
+- Add `checks.battery_12v_pct`, populated from `status.engine.batteryCharge12v`
+  (`battery.batSoc`) — the 12V starter battery's state of charge, which the car
+  has always reported and we never stored. Migrated in place with the same
+  idempotent `ALTER TABLE`; existing rows keep a null and are never emitted as a
+  reading. A reported **0** is stored as 0 (issue #16).
+- `status-json` emits two new **optional** keys, omitted rather than nulled when
+  unknown: `battery_12v_percent`, and `tire_pressure_warning` with the four
+  wheel lamps plus the dash master lamp as booleans. `REQUIRED_STATUS_FIELDS` is
+  unchanged, so the producer boundary deploys in either order.
+- The tire lamps are read **by** the newest check's id rather than as "the newest
+  TPMS row", which were two different polls whenever the newest check had no
+  TPMS row. `monitor.ts` writes the check and its TPMS row in one transaction so
+  that window no longer opens on a crash.
+- Reading the tire lamps cannot cost the required fields: a missing or corrupt
+  `tpms_readings` omits `tire_pressure_warning` and nothing else. (A design
+  property of the new read, not a fix — the old `status-json` never touched that
+  table.) The failure mode it does change: a `tpms_readings` insert that fails
+  now rolls its check back, so `status-json` serves the previous hour's range
+  rather than this hour's range with no tire state.
+
 ## 2026-09-22
 
 - Add `npm run status-json`: one JSON object (`vehicle`, `range_miles`,

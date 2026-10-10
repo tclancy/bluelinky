@@ -2,7 +2,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 import Database from 'better-sqlite3';
-import { VehicleDb } from '../src/vehicle-db';
+import { VehicleDb, batteryPctOrNull } from '../src/vehicle-db';
 
 function tmpDb(): { db: VehicleDb; cleanup: () => void } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bluelinky-test-'));
@@ -35,6 +35,7 @@ describe('VehicleDb', () => {
       is_fillup: 0,
       odometer_mi: null,
       car_reported_at: null,
+      battery_12v_pct: null,
     });
 
     expect(id).toBeGreaterThan(0);
@@ -59,6 +60,7 @@ describe('VehicleDb', () => {
       is_fillup: 1,
       odometer_mi: 42000,
       car_reported_at: null,
+      battery_12v_pct: null,
     });
 
     const last = db.getLastCheck();
@@ -78,6 +80,7 @@ describe('VehicleDb', () => {
       is_fillup: 0,
       odometer_mi: null,
       car_reported_at: null,
+      battery_12v_pct: null,
     });
 
     db.insertTpms({
@@ -135,6 +138,7 @@ describe('VehicleDb', () => {
       is_fillup: 0,
       odometer_mi: null,
       car_reported_at: null,
+      battery_12v_pct: null,
     });
     db.insertCheck({
       ts: '2026-04-15T11:00:00Z',
@@ -144,6 +148,7 @@ describe('VehicleDb', () => {
       is_fillup: 0,
       odometer_mi: null,
       car_reported_at: null,
+      battery_12v_pct: null,
     });
 
     const last = db.getLastCheck();
@@ -166,6 +171,7 @@ describe('VehicleDb', () => {
       is_fillup: 0,
       odometer_mi: null,
       car_reported_at: '2026-09-19T11:04:00.000Z',
+      battery_12v_pct: null,
     });
 
     const last = db.getLastCheck();
@@ -184,8 +190,223 @@ describe('VehicleDb', () => {
       is_fillup: 0,
       odometer_mi: null,
       car_reported_at: null,
+      battery_12v_pct: null,
     });
     expect(db.getLastCheck()!.car_reported_at).toBeNull();
+    cleanup();
+  });
+
+  it('round-trips the 12V battery percentage, including a reported 0', () => {
+    const { db, cleanup } = tmpDb();
+
+    db.insertCheck({
+      ts: '2026-10-07T21:24:54.000Z',
+      vehicle_name: '2020 SANTA FE',
+      range_mi: 236,
+      temp_f: null,
+      is_fillup: 0,
+      odometer_mi: null,
+      car_reported_at: '2026-10-07T21:24:54.000Z',
+      battery_12v_pct: 84,
+    });
+    expect(db.getLastCheck()!.battery_12v_pct).toBe(84);
+
+    db.insertCheck({
+      ts: '2026-10-07T22:24:54.000Z',
+      vehicle_name: '2020 SANTA FE',
+      range_mi: 236,
+      temp_f: null,
+      is_fillup: 0,
+      odometer_mi: null,
+      car_reported_at: '2026-10-07T22:24:54.000Z',
+      // 0, not null: this must come back as 0. A column the insert statement
+      // forgot would come back NULL here and the 84 above would still pass.
+      battery_12v_pct: 0,
+    });
+    expect(db.getLastCheck()!.battery_12v_pct).toBe(0);
+
+    cleanup();
+  });
+
+  it('stores null when the car reported no 12V battery value', () => {
+    const { db, cleanup } = tmpDb();
+    db.insertCheck({
+      ts: '2026-10-07T21:24:54.000Z',
+      vehicle_name: '2020 SANTA FE',
+      range_mi: 236,
+      temp_f: null,
+      is_fillup: 0,
+      odometer_mi: null,
+      car_reported_at: null,
+      battery_12v_pct: null,
+    });
+    expect(db.getLastCheck()!.battery_12v_pct).toBeNull();
+    cleanup();
+  });
+});
+
+describe('batteryPctOrNull', () => {
+  it('passes a finite number through, zero included', () => {
+    expect(batteryPctOrNull(84)).toBe(84);
+    expect(batteryPctOrNull(0)).toBe(0);
+    expect(batteryPctOrNull(100)).toBe(100);
+  });
+
+  it('nulls the two absent spellings a SELECT * can produce', () => {
+    // `null` is an explicit "the car said nothing"; `undefined` is a row written
+    // before the column existed. The reader must not be able to tell them apart.
+    expect(batteryPctOrNull(null)).toBeNull();
+    expect(batteryPctOrNull(undefined)).toBeNull();
+  });
+
+  it('nulls a number that is not finite', () => {
+    // `typeof NaN === 'number'`, so a typeof-only guard lets this through and
+    // the writer then stores something SQLite reads back as NULL -- the two
+    // sides of the round-trip disagreeing about what happened.
+    expect(batteryPctOrNull(NaN)).toBeNull();
+    expect(batteryPctOrNull(Infinity)).toBeNull();
+    expect(batteryPctOrNull(-Infinity)).toBeNull();
+  });
+
+  it('nulls a value of any other type', () => {
+    // SQLite's typing is dynamic, so an INTEGER column can hand back a string.
+    expect(batteryPctOrNull('84')).toBeNull();
+    expect(batteryPctOrNull(true)).toBeNull();
+    expect(batteryPctOrNull({ batSoc: 84 })).toBeNull();
+    expect(batteryPctOrNull([84])).toBeNull();
+  });
+
+  it('does not range-check, because the hub is what owns that rule', () => {
+    // `fuel.Reading` has the 0-100 CheckConstraint and the producer sanitises
+    // out-of-range to None. Clamping here would make a bad reading look like a
+    // good one by the time anything could notice.
+    expect(batteryPctOrNull(140)).toBe(140);
+    expect(batteryPctOrNull(-5)).toBe(-5);
+  });
+});
+
+describe('getTpmsForCheck', () => {
+  function twoChecksOneTpms(): {
+    db: VehicleDb;
+    older: number;
+    newer: number;
+    cleanup: () => void;
+  } {
+    const { db, cleanup } = tmpDb();
+    const base = {
+      vehicle_name: '2020 SANTA FE',
+      range_mi: 88,
+      temp_f: null,
+      is_fillup: 0,
+      odometer_mi: null,
+      battery_12v_pct: null,
+    };
+    const older = db.insertCheck({
+      ...base,
+      ts: '2026-10-07T20:00:00.000Z',
+      car_reported_at: '2026-10-07T19:00:00.000Z',
+    });
+    db.insertTpms({
+      check_id: older,
+      ts: '2026-10-07T20:00:00.000Z',
+      front_left: 1,
+      front_right: 0,
+      rear_left: 0,
+      rear_right: 0,
+      all_lamps: 0,
+    });
+    const newer = db.insertCheck({
+      ...base,
+      ts: '2026-10-07T21:00:00.000Z',
+      car_reported_at: '2026-10-07T20:00:00.000Z',
+    });
+    return { db, older, newer, cleanup };
+  }
+
+  it('returns the reading belonging to the check it was asked about', () => {
+    const { db, older, cleanup } = twoChecksOneTpms();
+    const reading = db.getTpmsForCheck(older);
+    expect(reading).not.toBeNull();
+    expect(reading!.check_id).toBe(older);
+    expect(reading!.front_left).toBe(1);
+    cleanup();
+  });
+
+  it('returns null for a check with no reading, where getLastTpms returns one', () => {
+    // The two queries differ exactly here, and this is the pair of assertions
+    // that proves the implementation is not `getLastTpms()` under another name.
+    const { db, older, newer, cleanup } = twoChecksOneTpms();
+    expect(db.getTpmsForCheck(newer)).toBeNull();
+    expect(db.getLastTpms()!.check_id).toBe(older);
+    cleanup();
+  });
+
+  it('returns null for a check id that does not exist', () => {
+    const { db, cleanup } = twoChecksOneTpms();
+    expect(db.getTpmsForCheck(99999)).toBeNull();
+    cleanup();
+  });
+});
+
+describe('insertCheckWithTpms', () => {
+  const check = {
+    ts: '2026-10-07T21:24:54.000Z',
+    vehicle_name: '2020 SANTA FE',
+    range_mi: 236,
+    temp_f: 63.7,
+    is_fillup: 0,
+    odometer_mi: null,
+    car_reported_at: '2026-10-07T21:24:54.000Z',
+    battery_12v_pct: 84,
+  };
+  const lamps = {
+    ts: '2026-10-07T21:24:54.000Z',
+    front_left: 0,
+    front_right: 0,
+    rear_left: 1,
+    rear_right: 0,
+    all_lamps: 0,
+  };
+
+  it('writes both rows and links them', () => {
+    const { db, cleanup } = tmpDb();
+    const checkId = db.insertCheckWithTpms(check, lamps);
+
+    expect(db.getLastCheck()!.id).toBe(checkId);
+    const reading = db.getTpmsForCheck(checkId);
+    expect(reading!.check_id).toBe(checkId);
+    expect(reading!.rear_left).toBe(1);
+
+    cleanup();
+  });
+
+  it('rolls the check back when the TPMS insert fails', () => {
+    // A REAL statement failure, not a monkeypatched throw: `front_left` is
+    // `INTEGER NOT NULL`, so SQLite raises inside the transaction AFTER the
+    // check row has been inserted. A thrown mock would fire before any
+    // statement ran, and the test would pass with no transaction at all.
+    const { db, cleanup } = tmpDb();
+
+    expect(() =>
+      db.insertCheckWithTpms(check, {
+        ...lamps,
+        front_left: null as unknown as number,
+      })
+    ).toThrow(/NOT NULL/);
+
+    // The whole point: no orphan check row survives the failure.
+    expect(db.getLastCheck()).toBeNull();
+    expect(db.getLastTpms()).toBeNull();
+
+    cleanup();
+  });
+
+  it('control: the same check row inserts fine on its own', () => {
+    // Without this, the assertion above passes just as well against a check row
+    // that was never insertable -- which would make the rollback claim vacuous.
+    const { db, cleanup } = tmpDb();
+    expect(db.insertCheck(check)).toBeGreaterThan(0);
+    expect(db.getLastCheck()).not.toBeNull();
     cleanup();
   });
 });
@@ -231,6 +452,7 @@ describe('VehicleDb migration onto a pre-existing checks table', () => {
     );
     raw.close();
     expect(columns).not.toContain('car_reported_at');
+    expect(columns).not.toContain('battery_12v_pct');
     cleanup();
   });
 
@@ -253,8 +475,11 @@ describe('VehicleDb migration onto a pre-existing checks table', () => {
       is_fillup: 0,
       odometer_mi: null,
       car_reported_at: '2026-09-22T18:41:00.000Z',
+      battery_12v_pct: 84,
     });
     expect(db.getLastCheck()!.car_reported_at).toBe('2026-09-22T18:41:00.000Z');
+    // Both columns, not whichever one `addColumnIfMissing` reached first.
+    expect(db.getLastCheck()!.battery_12v_pct).toBe(84);
 
     db.close();
     cleanup();
@@ -262,6 +487,99 @@ describe('VehicleDb migration onto a pre-existing checks table', () => {
 
   it('is idempotent -- a second open does not throw a duplicate-column error', () => {
     const { dbPath, cleanup } = legacyDb();
+    const first = new VehicleDb(dbPath);
+    first.close();
+    expect(() => {
+      const second = new VehicleDb(dbPath);
+      second.close();
+    }).not.toThrow();
+    cleanup();
+  });
+});
+
+/**
+ * Production's shape **today**, which is not the legacy shape above.
+ *
+ * plexpi's `vehicle-monitor.db` has already been through the `car_reported_at`
+ * migration, so the database the battery migration will actually meet has seven
+ * columns, not six. A fixture that lacks both columns cannot tell "adds the
+ * battery column" from "adds whichever column is missing first" — and
+ * `addColumnIfMissing` returns early on the first match, so a loop that checked
+ * one column and stopped would pass against the legacy fixture and leave
+ * production unmigrated.
+ */
+describe('VehicleDb migration onto a table that already has car_reported_at', () => {
+  function currentShapeDb(): { dbPath: string; cleanup: () => void } {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bluelinky-current-'));
+    const dbPath = path.join(dir, 'current.db');
+    const raw = new Database(dbPath);
+    raw.exec(`
+      CREATE TABLE checks (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts          TEXT    NOT NULL,
+        vehicle_name TEXT   NOT NULL,
+        range_mi    REAL    NOT NULL,
+        temp_f      REAL,
+        is_fillup   INTEGER NOT NULL DEFAULT 0,
+        odometer_mi REAL,
+        car_reported_at TEXT
+      );
+    `);
+    raw
+      .prepare(
+        'INSERT INTO checks (ts, vehicle_name, range_mi, temp_f, is_fillup, odometer_mi,' +
+          " car_reported_at) VALUES ('2026-10-07T20:00:10.407Z', '2020 SANTA FE', 236, 60.7, 0," +
+          " NULL, '2026-10-07T19:24:54.000Z')"
+      )
+      .run();
+    raw.close();
+    return { dbPath, cleanup: () => fs.rmSync(dir, { recursive: true }) };
+  }
+
+  it('control: the fixture has car_reported_at and lacks battery_12v_pct', () => {
+    const { dbPath, cleanup } = currentShapeDb();
+    const raw = new Database(dbPath);
+    const columns = (raw.prepare('PRAGMA table_info(checks)').all() as { name: string }[]).map(
+      c => c.name
+    );
+    raw.close();
+    expect(columns).toContain('car_reported_at');
+    expect(columns).not.toContain('battery_12v_pct');
+    cleanup();
+  });
+
+  it('adds the battery column and preserves the existing row', () => {
+    const { dbPath, cleanup } = currentShapeDb();
+
+    const db = new VehicleDb(dbPath);
+    const last = db.getLastCheck();
+
+    expect(last).not.toBeNull();
+    expect(last!.range_mi).toBe(236);
+    // The pre-upgrade row's car time survives, and its battery is absent rather
+    // than fabricated. `== null` not `=== null`: `SELECT *` on a freshly ALTERed
+    // column gives null, but the distinction is the one the reader relies on.
+    expect(last!.car_reported_at).toBe('2026-10-07T19:24:54.000Z');
+    expect(last!.battery_12v_pct == null).toBe(true);
+
+    db.insertCheck({
+      ts: '2026-10-07T21:00:00.000Z',
+      vehicle_name: '2020 SANTA FE',
+      range_mi: 230,
+      temp_f: 61,
+      is_fillup: 0,
+      odometer_mi: null,
+      car_reported_at: '2026-10-07T20:24:54.000Z',
+      battery_12v_pct: 84,
+    });
+    expect(db.getLastCheck()!.battery_12v_pct).toBe(84);
+
+    db.close();
+    cleanup();
+  });
+
+  it('is idempotent -- a second open does not throw a duplicate-column error', () => {
+    const { dbPath, cleanup } = currentShapeDb();
     const first = new VehicleDb(dbPath);
     first.close();
     expect(() => {
