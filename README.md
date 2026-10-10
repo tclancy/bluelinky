@@ -88,7 +88,7 @@ which is what keeps the history.
 
 ```sh
 npm run --silent status-json
-{"vehicle":"2020 SANTA FE","range_miles":88,"reported_at":"2026-09-22T16:36:29.000Z"}
+{"vehicle":"2020 SANTA FE","range_miles":236,"reported_at":"2026-10-07T21:24:54.000Z","battery_12v_percent":84,"tire_pressure_warning":{"front_left":false,"front_right":false,"rear_left":false,"rear_right":false,"all":false}}
 ```
 
 One JSON object on stdout, for
@@ -135,6 +135,48 @@ runs a check on container start, so after a rebuild a usable row lands
 immediately rather than at the next `:00` — but until one does, the command
 exits 1, which the producer reads as an unreachable car rather than a healthy
 tick.
+
+### The two optional fields
+
+`vehicle`, `range_miles` and `reported_at` are the three the producer requires;
+a missing one is indistinguishable, there, from a car it could not reach.
+`battery_12v_percent` and `tire_pressure_warning` are **optional, and omitted
+rather than nulled** when the newest check has no value for them. The producer
+picks fields by name, so an old producer ignores a new key and a new producer
+reads an absent key as `None` — which is what makes this boundary deployable in
+either order.
+
+| Key                     | Source                                                                         | Omitted when                                                  |
+| ----------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------- |
+| `battery_12v_percent`   | `checks.battery_12v_pct` ← `status.engine.batteryCharge12v` (`battery.batSoc`) | the column is absent (pre-migration row) or the value is null |
+| `tire_pressure_warning` | the `tpms_readings` row whose `check_id` is that check                         | that check has no TPMS row                                    |
+
+Two things it is worth not mistaking:
+
+- **It is the 12V starter battery, not a traction battery.** The car is an ICE
+  Santa Fe; `batSoc` is the accessory battery the starter draws on.
+- **The tire fields are lamps, not pressures.** A `refresh: false` status carries
+  no PSI or kPa of any kind — only the five `tirePressureLamp` flags — and `all`
+  is plausibly the dash master lamp rather than "all four are low", so nothing
+  here should be rendered as a per-wheel pressure or as a claim about all four.
+  `oil` is absent from the response entirely.
+
+A `0` battery reading is **emitted, not omitted.** A flat 12V is the single most
+worth-reporting value this field carries, and it is the one a truthiness guard
+drops.
+
+The tire lamps are read **by** the newest check's id, never as "the newest TPMS
+row". The two differ exactly when the newest check has no TPMS row, and the
+difference is a document pairing this poll's range with an earlier poll's tire
+state — both halves looking equally fresh. `monitor.ts` now writes the check and
+its TPMS row in one transaction, so that window no longer opens on a crash.
+
+**That transaction changes which thing you lose when the TPMS insert fails.**
+Before, the check row survived and `status-json` still had this hour's range with
+no tire state; now the check rolls back and the command serves last hour's
+reading instead. The pairing is worth it — a mismatched pair reads as fresh and a
+stale pair is dated by `reported_at` — but it is the behaviour to expect when
+debugging a range that stopped moving while the monitor's log looks fine.
 
 One asymmetry worth knowing before you debug the car: if the **monitor** stops
 while the producer keeps running, the newest row stops moving and its
