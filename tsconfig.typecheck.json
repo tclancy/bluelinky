@@ -8,15 +8,19 @@
   // required `CheckRow` field forces a writer to supply it -- could not fire
   // against the one production writer. This config is what makes them fire.
   //
-  // Narrow on purpose. Four other root files are NOT here:
-  //   monitor-fuel.ts  -- three real pre-existing errors, see issue #19
-  //   debug.ts, get-fuel-level.ts, __tests__/  -- ~12 more, separate work
+  // Narrow on purpose. Three other root paths are NOT here:
+  //   debug.ts, get-fuel-level.ts, __tests__/  -- ~12 real errors, separate work
   // Widening this is a follow-up, not a drive-by: a config that cannot pass
   // today would be a permanently red gate, which is the same non-gate as none.
+  //
+  // `monitor-fuel.ts` joined the covered set in #19. It was held out for the
+  // three `TS2345` errors PR #21 fixed, and nothing else -- its whole import
+  // graph was already clean, which is why it could be added by widening one
+  // line rather than by a second round of fixes.
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["src", "monitor.ts", "status-json.ts", "alert-backends.ts"]
+  "include": ["src", "monitor.ts", "status-json.ts", "alert-backends.ts", "monitor-fuel.ts"]
 }

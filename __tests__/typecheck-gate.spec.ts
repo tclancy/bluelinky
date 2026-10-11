@@ -27,8 +27,21 @@ const CONFIG = path.join(ROOT, 'tsconfig.typecheck.json');
 const PACKAGE = path.join(ROOT, 'package.json');
 const WORKFLOW = path.join(ROOT, '.github', 'workflows', 'ci.yaml');
 
-/** The root-level entry points the gate must cover, and why each one matters. */
-const COVERED_ENTRY_POINTS = ['monitor.ts', 'status-json.ts'];
+/**
+ * Every root-level path the gate covers, `src` excluded.
+ *
+ * This list is asserted as a SET against the config's own `include`, not as a
+ * floor, so it has to be exhaustive in both directions: dropping a file from
+ * the config fails, and adding one here without adding it there fails too.
+ * A floor would have let `alert-backends.ts` be silently removed -- it was in
+ * the config and not in this list from the day it was added until #19.
+ */
+const COVERED_ENTRY_POINTS = [
+  'monitor.ts',
+  'status-json.ts',
+  'alert-backends.ts',
+  'monitor-fuel.ts',
+];
 
 describe('the typecheck gate', () => {
   it('reachability control: all three files exist and are non-empty', () => {
@@ -58,14 +71,20 @@ describe('the typecheck gate', () => {
       .map(item => item.trim().replace(/^"/, '').replace(/"$/, ''))
       .filter(item => item !== '');
 
-    // Control on the control: a regex that matched nothing would make every
-    // `toContain` below fail, but a regex that matched an EMPTY list would too
+    // Control on the control: a regex that matched nothing would make the
+    // assertions below fail, but a regex that matched an EMPTY list would too
     // -- and this is the assertion that tells those apart from a real removal.
     expect(entries.length).toBeGreaterThanOrEqual(COVERED_ENTRY_POINTS.length + 1);
     expect(entries).toContain('src');
-    for (const entry of COVERED_ENTRY_POINTS) {
-      expect(entries).toContain(entry);
-    }
+
+    // Set equality on the non-`src` entries, not a per-entry `toContain` floor.
+    // A floor only proves the config is a superset of this list, so a file
+    // present in the config and absent from the list is unguarded -- which is
+    // exactly what `alert-backends.ts` was. Equality also fails on an entry
+    // added to the config that nobody added here, which is the review hook.
+    expect(new Set(entries.filter(entry => entry !== 'src'))).toEqual(
+      new Set(COVERED_ENTRY_POINTS)
+    );
   });
 
   it('is invoked by an npm script, which is invoked by CI', () => {
