@@ -249,6 +249,36 @@ pre-commit install
 Re-run it even if you have installed before — the push hook was only declared
 in #12, and `pre-commit install` does not add hook types retroactively.
 
+**pre-commit is the only hook manager here. Do not reintroduce husky** (#11,
+Tom's call 2026-10-10). From 2026-02-09 this repo carried 17 husky v4 shims in
+`.git/hooks` — plus husky's own `husky.sh` and `husky.local.sh` — with no husky
+configuration behind any of them. Every push ran a hook that resolved to
+nothing and exited 0: worse than no hook, because it reads as a gate to anyone
+looking. husky itself was no longer a declared dependency; the shims outlived
+it, and `dispatch gates --install` deliberately refuses to overwrite a pre-push
+hook it did not generate, so they had to be cleared by hand.
+
+Two consequences worth knowing:
+
+- `pre-commit install` **chains** to a foreign hook rather than replacing it —
+  it moves the existing file to `.git/hooks/<hook>.legacy` and keeps invoking
+  it. So arming pre-commit over a husky shim leaves the shim live. If you have
+  a `.git/hooks/pre-push.legacy` or `pre-commit.legacy` from before #11, delete
+  it; nothing in this repo recreates them.
+- `npm ci` does **not** bring husky back, measured rather than assumed: it is
+  absent from every dependency key in `package.json`, and although
+  `package-lock.json` still carries an orphaned `node_modules/husky` entry,
+  a from-scratch `npm ci` reports `added 860 packages` and husky is not among
+  them. That stale lockfile entry is left alone deliberately: regenerating the
+  lock to drop it rewrote 38,567 lines of the 19,520-line file and re-resolved
+  every dependency, which is a dependency bump nobody asked for.
+
+If a JS-side hook is ever wanted, add it to `.pre-commit-config.yaml` as a
+`local` / `language: system` hook beside the existing ESLint, tsc and Prettier
+entries. `__tests__/hook-manager.spec.ts` fails if husky returns to
+`package.json` in any form; `__tests__/pre-commit-config.spec.ts` pins the
+pre-commit declaration itself.
+
 ## Documentation
 
 Checkout out the [docs](https://bluelinky.readme.io) for more info.
