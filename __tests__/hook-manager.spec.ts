@@ -7,13 +7,16 @@ import path from 'path';
  * retired.** Tom's call, 2026-10-10 -- "Drop husky, use pre-commit".
  *
  * Why this needs a test rather than a sentence in a doc. Between 2026-02-09 and
- * 2026-10-10 this repo had 19 husky v4 shims in `.git/hooks` and **no husky
- * configuration anywhere**, so every push ran a hook that resolved to nothing
- * and exited 0. It was not a gate; it was a file shaped like one, and that shape
- * is what made the fleet gate audit skip this repo instead of reporting it
- * unarmed. The dead shim also survived arming pre-commit -- `pre-commit install`
- * runs in migration mode and chains to a foreign hook as `<hook>.legacy` rather
- * than replacing it.
+ * 2026-10-10 this repo carried 19 husky files in `.git/hooks` -- 17 hook shims,
+ * two of them renamed `.legacy`, plus husky's own `husky.sh` and
+ * `husky.local.sh` -- and **no husky configuration anywhere**, so a push ran a
+ * hook that resolved to nothing and exited 0. It was not a gate; it was a file
+ * shaped like one. The fleet gate audit did report it (`INERT`, naming the
+ * foreign hook); what the shape blocked was the automated *remediation*, which
+ * deliberately refuses to overwrite a pre-push hook it did not generate. The
+ * dead shim also survived arming pre-commit -- `pre-commit install` runs in
+ * migration mode and chains to a foreign hook as `<hook>.legacy` rather than
+ * replacing it.
  *
  * `.pre-commit-config.yaml` is guarded separately by `pre-commit-config.spec.ts`,
  * which pins the declaration. This file pins the other half: that nothing else
@@ -22,16 +25,25 @@ import path from 'path';
  * The two halves of what is asserted here are enforced very differently, and the
  * comments say which is which:
  *
- *   package.json  -- tracked, so CI enforces it. This is where husky would
- *                    actually come back: one `npm i -D husky`.
- *   .git/hooks    -- untracked local state. A fresh clone and CI both have only
- *                    `.sample` files there, so that assertion is a canary for a
- *                    developer machine, not a CI gate. It is still worth having:
- *                    the 19 shims above lived there for eight months.
+ *   package.json      -- tracked, so CI enforces it. This is where husky would
+ *   package-lock.json    actually come back: one `npm i -D husky`. The lockfile
+ *                        is asserted too because its copy of the root manifest
+ *                        was still declaring `devDependencies.husky: ^4.2.5`
+ *                        after husky left `package.json`, so a reader grepping
+ *                        the repo found a live declaration.
+ *   .git/hooks        -- untracked local state, and the canary over it is
+ *                        **vacuous in CI by construction**: a checkout there has
+ *                        no live hook files at all, so the scan opens zero files
+ *                        and passes. Its value is on a developer machine, where
+ *                        the 19 files above sat for eight months. Do not read it
+ *                        as a gate, and do not read the directory-resolution
+ *                        test as its reachability control -- that control proves
+ *                        the directory resolved, not that any file was read.
  */
 
 const ROOT = path.join(__dirname, '..');
 const PACKAGE = path.join(ROOT, 'package.json');
+const LOCKFILE = path.join(ROOT, 'package-lock.json');
 
 /**
  * Every manifest key npm installs from.
@@ -58,6 +70,25 @@ interface Manifest {
 
 function manifest(): Manifest {
   return JSON.parse(fs.readFileSync(PACKAGE, 'utf8')) as Manifest;
+}
+
+interface Lockfile {
+  packages?: Record<string, Manifest>;
+  dependencies?: Record<string, unknown>;
+}
+
+function lockfile(): Lockfile {
+  return JSON.parse(fs.readFileSync(LOCKFILE, 'utf8')) as Lockfile;
+}
+
+/**
+ * Every package name the lockfile declares as a direct dependency of the root
+ * project -- i.e. `packages[""]`, which is the lockfile's own copy of
+ * `package.json`'s dependency keys, not the flat install tree.
+ */
+function lockDeclaredPackages(): string[] {
+  const root = lockfile().packages?.[''] ?? {};
+  return DEPENDENCY_KEYS.flatMap(key => Object.keys((root[key] as object | undefined) ?? {}));
 }
 
 /** Every package name declared across all four dependency keys. */
@@ -130,35 +161,84 @@ describe('husky is retired; pre-commit owns the hooks', () => {
     expect(invoking).toEqual([]);
   });
 
+  it('reachability control: the lockfile parses and declares the known dependency', () => {
+    // Same shape as the manifest control, and needed for the same reason: every
+    // lockfile assertion below is a `not.toContain`, which an empty reader
+    // satisfies. This fails if `packages[""]` is renamed or the file moves.
+    expect(fs.existsSync(LOCKFILE)).toBe(true);
+    expect(lockDeclaredPackages()).toContain(CONTROL_DEPENDENCY);
+  });
+
+  it('does not declare or record husky anywhere in the lockfile', () => {
+    // 1. The lockfile's copy of the root manifest. This is the one that was
+    //    wrong for months: `devDependencies.husky: ^4.2.5` survived there after
+    //    husky left package.json, so the repo still *declared* husky.
+    expect(lockDeclaredPackages()).not.toContain('husky');
+
+    const lock = lockfile();
+
+    // 2. The install tree -- `node_modules/husky` and anything nested under it.
+    const installed = Object.keys(lock.packages ?? {}).filter(key =>
+      /(^|\/)node_modules\/husky(\/|$)/.test(key)
+    );
+    expect(installed).toEqual([]);
+
+    // 3. The legacy `dependencies` mirror. lockfileVersion 2 carries both
+    //    shapes, and asserting only `packages` leaves half the file unread.
+    expect(Object.keys(lock.dependencies ?? {})).not.toContain('husky');
+
+    // 4. Text backstop, because the three structured reads above each assume a
+    //    schema. A package legitimately named `*husky*` would trip this; none
+    //    exists, and a false red here is cheap next to a silent miss.
+    expect(fs.readFileSync(LOCKFILE, 'utf8').toLowerCase()).not.toContain('husky');
+  });
+
   it('git resolves a hooks directory for this checkout', () => {
     // Reachability control for the test below, which cannot tell "no husky
     // shims" from "never looked".
     const directory = hooksDirectory();
     expect(directory).not.toBeNull();
     expect(fs.existsSync(directory!)).toBe(true);
-    // A real hooks directory always has git's own `.sample` files in it. An
-    // empty one means we resolved somewhere unexpected.
-    expect(fs.readdirSync(directory!).length).toBeGreaterThan(0);
+    expect(fs.statSync(directory!).isDirectory()).toBe(true);
+    // Deliberately no assertion on the CONTENTS. The obvious one -- "a real
+    // hooks directory has git's own `.sample` files" -- is false on this fleet:
+    // `init.templateDir` is set, and a fresh `git init` here produces a hooks
+    // directory holding exactly one file and no samples at all. Measured.
+    // So this test proves only that the path resolved and is a directory, which
+    // is all it can prove, and the canary below says what it therefore cannot.
   });
 
-  it('local canary: no husky shim in the directory git runs hooks from', () => {
+  it('local canary (vacuous in CI): no husky shim among the live hook files', () => {
     const directory = hooksDirectory();
+    // `throw`, not `return`. A bare return is a silent pass, and under a `-t`
+    // filter the control test it defers to is skipped rather than run -- so
+    // "already a failure above" would be false exactly when it mattered.
     if (directory === null || !fs.existsSync(directory)) {
-      return; // Already a failure in the control above; do not double-report.
+      throw new Error(`no hooks directory to scan: ${directory}`);
     }
 
     // `.sample` files are git's own and are never executed. Everything else in
     // here is live, including the `<hook>.legacy` files `pre-commit install`
     // creates when it chains to a foreign hook -- which is exactly the shape
     // that kept husky running here after pre-commit was armed.
+    // `lstatSync`, not `statSync`: a dangling symlink in the hooks directory
+    // makes `statSync` throw ENOENT, which takes this test down as an error
+    // rather than as a readable verdict. A symlinked hook is still a hook.
     const live = fs
       .readdirSync(directory)
       .filter(entry => !entry.endsWith('.sample'))
-      .filter(entry => fs.statSync(path.join(directory, entry)).isFile());
+      .filter(entry => {
+        const stat = fs.lstatSync(path.join(directory, entry));
+        return stat.isFile() || stat.isSymbolicLink();
+      });
 
-    const husky = live.filter(entry =>
-      /husky/i.test(fs.readFileSync(path.join(directory, entry), 'utf8'))
-    );
+    const husky = live.filter(entry => {
+      try {
+        return /husky/i.test(fs.readFileSync(path.join(directory, entry), 'utf8'));
+      } catch {
+        return false; // broken symlink: not a husky shim, and not this test's problem
+      }
+    });
 
     // Named rather than counted, so the failure message tells a developer which
     // files to delete. Remedy: `rm` them -- they are untracked local state and
