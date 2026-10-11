@@ -27,3 +27,16 @@ export function shouldUseFetchTransport(nodeVersion: string = process.versions.n
   const [major] = nodeVersion.split('.').map(Number);
   return major >= FETCH_TRANSPORT_MIN_NODE_MAJOR;
 }
+
+/**
+ * One-line record of what the given interpreter selects, for the debug log.
+ *
+ * Lives here rather than at the call sites so that the version read stays in
+ * one module — the property the structural test in
+ * `__tests__/canadian-transport.spec.ts` enforces.
+ */
+export function describeFetchTransport(nodeVersion: string = process.versions.node): string {
+  return `node ${nodeVersion} -> ${
+    shouldUseFetchTransport(nodeVersion) ? 'fetch (undici)' : 'got'
+  }`;
+}

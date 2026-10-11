@@ -25,6 +25,7 @@ import path from 'path';
 import CanadianVehicle from '../src/vehicles/canadian.vehicle';
 import { CanadianController } from '../src/controllers/canadian.controller';
 import {
+  describeFetchTransport,
   shouldUseFetchTransport,
   FETCH_TRANSPORT_MIN_NODE_MAJOR,
 } from '../src/tools/runtime.tools';
@@ -64,6 +65,7 @@ const buildCanadianVehicle = (): CanadianVehicle => {
       brandIndicator: 'H',
       regId: '123123',
       generation: '2',
+      id: 'JEST_VEHICLE_ID',
     } as any,
     controller
   );
@@ -96,8 +98,20 @@ describe('shouldUseFetchTransport', () => {
     expect(shouldUseFetchTransport('not-a-version')).toBe(false);
   });
 
-  it('reads the running interpreter when given no argument', () => {
-    expect(shouldUseFetchTransport()).toBe(shouldUseFetchTransport(process.versions.node));
+  it('defaults to the running interpreter, not to a pinned version', () => {
+    // Derived from `process.version` — a different API than the production
+    // default reads — so comparing the function against itself (which a
+    // hardcoded default would also satisfy) is avoided.
+    const runningMajor = Number(process.version.replace(/^v/, '').split('.')[0]);
+
+    expect(shouldUseFetchTransport()).toBe(runningMajor >= FETCH_TRANSPORT_MIN_NODE_MAJOR);
+  });
+});
+
+describe('describeFetchTransport', () => {
+  it('names the version and the arm it selects', () => {
+    expect(describeFetchTransport('20.19.5')).toEqual('node 20.19.5 -> got');
+    expect(describeFetchTransport('25.6.1')).toEqual('node 25.6.1 -> fetch (undici)');
   });
 });
 
@@ -121,8 +135,11 @@ describe('CanadianController.useFetchTransport', () => {
       expect(source).toMatch(/useFetchTransport/);
       // An inline version read here is the regression this file exists for:
       // it would be invisible to every assertion above, because the flag would
-      // still be set and simply not consulted.
-      expect(source).not.toMatch(/process\.versions\.node/);
+      // still be set and simply not consulted. `process.version` as well as
+      // `process.versions` — banning one spelling passes the other, and a
+      // second interpreter check ANDed with the flag reintroduces exactly the
+      // drift between the two request paths that #26 is about.
+      expect(source).not.toMatch(/process\.version/);
     }
   });
 });
@@ -187,6 +204,9 @@ describe('Canadian fetch transport (Node >= 21 arm)', () => {
     expect(options.headers).toMatchObject({
       accessToken: 'JEST_TOKEN',
       'Content-Type': 'application/json',
+      // The one header unique to the vehicle path, and so the likeliest thing
+      // to be dropped by a future edit to that hand-assembled block.
+      vehicleId: 'JEST_VEHICLE_ID',
     });
     expect(options.method).toEqual('POST');
   });

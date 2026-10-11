@@ -122,7 +122,7 @@ describe('CanadianController', () => {
     const controller = getController('CA');
     // `got` arm on purpose — see the note in vehicle.spec.ts and #26. The
     // `fetch` arm is covered in canadian-transport.spec.ts.
-    (controller as any).useFetchTransport = false;
+    (controller as CanadianController).useFetchTransport = false;
 
     (got as any).mockReturnValueOnce({
       body: {
