@@ -249,6 +249,50 @@ pre-commit install
 Re-run it even if you have installed before — the push hook was only declared
 in #12, and `pre-commit install` does not add hook types retroactively.
 
+**pre-commit is the only hook manager here. Do not reintroduce husky** (#11,
+Tom's call 2026-10-10). From 2026-02-09 this repo carried **19 husky files** in
+`.git/hooks` — 17 hook shims, two of them renamed `pre-commit.legacy` and
+`pre-push.legacy`, plus husky's own `husky.sh` and `husky.local.sh` — with no
+husky configuration behind any of them. Until 2026-05-15 nothing else was
+installed, so every push ran a hook that resolved to nothing and exited 0:
+worse than no hook, because it reads as a gate to anyone looking. From
+2026-09-19 pre-commit's own `pre-push` was in place and did run the real
+battery, but it _chained_ the dead shim rather than replacing it, so the shim
+stayed live either way. `dispatch gates --install` deliberately refuses to
+overwrite a pre-push hook it did not generate, so these had to be cleared by
+hand.
+
+Two consequences worth knowing:
+
+- `pre-commit install` **chains** to a foreign hook rather than replacing it —
+  it moves the existing file to `.git/hooks/<hook>.legacy` and keeps invoking
+  it. So arming pre-commit over a husky shim leaves the shim live. If you have
+  a `.git/hooks/pre-push.legacy` or `pre-commit.legacy` from before #11, delete
+  it; nothing in this repo recreates a _husky_ one. A non-husky
+  `pre-push.legacy` is a different matter and is expected on a machine with
+  `init.templateDir` set — a fresh clone there arrives with a hook pre-commit
+  did not write, which the next `pre-commit install` chains the same way. That
+  one is also safe to delete.
+- **husky is gone from `package-lock.json` too**, not just `package.json`. The
+  lockfile's copy of the root manifest had been declaring
+  `devDependencies.husky: ^4.2.5` all along, with the install record and 22
+  exclusive transitives behind it. Removing it is **473 deletions, 0 additions
+  and 0 version changes** — `npm install --package-lock-only` resolves nothing
+  new, and `lockfileVersion` stays at 2. Verified by a from-scratch `npm ci`
+  against the cleaned lockfile: `added 860 packages`, no `node_modules/husky`.
+- **Beware a phantom whole-file lockfile diff.** `package-lock.json` is
+  committed with CRLF line endings (19,047 of them) and there is no
+  `.gitattributes`, while npm writes LF — so any `npm install` produces a diff
+  that touches every line and hides whatever actually changed. That is what
+  made the removal above look like a 38,567-line rewrite on first measurement.
+  Convert npm's output back to CRLF before diffing, or before committing it.
+
+If a JS-side hook is ever wanted, add it to `.pre-commit-config.yaml` as a
+`local` / `language: system` hook beside the existing ESLint, tsc and Prettier
+entries. `__tests__/hook-manager.spec.ts` fails if husky returns to
+`package.json` **or** `package-lock.json` in any form;
+`__tests__/pre-commit-config.spec.ts` pins the pre-commit declaration itself.
+
 ## Documentation
 
 Checkout out the [docs](https://bluelinky.readme.io) for more info.
