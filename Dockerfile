@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-#
 # Bluelinky Fuel Monitor -- deployment image for plexpi (linux/arm64, 905 MB RAM).
 #
 # TWO STAGES, and the split is about image CONTENT rather than build speed.
@@ -11,11 +9,19 @@
 # What this does NOT fix, so nobody reads a speed promise into it: the `npm ci`
 # layer's cache key is the CONTENT of package.json and package-lock.json, and
 # `npm ci` requires both. The 13-minute install on 2026-10-10 was NOT a lockfile
-# change -- PR #20 touched `package.json` only (+1 -0), and the lockfile has not
-# moved since. So any one-line edit to package.json -- a new npm script, a
+# change -- PR #20 touched `package.json` only (+1 -0), and at that point the
+# lockfile had not moved since `98ab73c` on 2026-04-15. (It has moved since:
+# `10fb15e`, PR #29, -473 lines, 2026-10-11. So the next build after that merge
+# re-runs the install for a reason unrelated to this change -- don't read it as
+# this layout failing.) Any one-line edit to package.json -- a new npm script, a
 # version bump -- still invalidates the install, in this layout exactly as in the
 # old one. The npm cache mount below is what softens that; building the image off
 # this box entirely is what would remove it.
+#
+# Also NOT fixed, and the plan listed it as a benefit: "a stale-`tsx` surprise
+# can no longer break the hourly job". Keeping the crontab on `tsx` forfeits
+# that outright -- `tsx` is still resolved at runtime, just from `dependencies`
+# now. See the note on the COPY below for why that trade was taken.
 
 ARG NODE_IMAGE=node:20-slim
 
@@ -61,6 +67,13 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+
+# No `# syntax=docker/dockerfile:1` directive above, deliberately. It would
+# make every cold build fetch a frontend image from Docker Hub, on a box whose
+# whole point is that an unattended `docker compose up -d --build` works. The
+# only thing here that needs BuildKit is the cache mount, and docker 29.4's
+# BUILT-IN frontend honours it: measured `--no-cache` both ways, same 266 MB
+# image, byte-identical file set, `RUN --mount=type=cache` executed.
 
 # The dev-free tree, including better-sqlite3's resolved native binding.
 COPY --from=deps /app/node_modules ./node_modules

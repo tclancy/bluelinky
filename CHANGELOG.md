@@ -22,6 +22,34 @@
   rather than on somebody remembering. Excluding `node_modules` is load-bearing
   too: the runtime stage copies a dev-free tree from `deps` and `COPY . .` runs
   after it, so a host `node_modules` in the context would overwrite it.
+  **The fail-closed guarantee holds at the repo root and inside `deployment/`,
+  and NOT inside `src/`** — `!src` re-admits the whole library, so a new file
+  there ships unless its name ends in `.env`. The `.dockerignore` header says so
+  in those words.
+- **Two corrections to that allow-list, both found by review and both measured
+  against real BuildKit rather than argued.** (1) `!deployment` admitted the
+  whole directory, so `deployment/README.md` shipped and any future
+  `deployment/<secret>` would have; it is now `!deployment/crontab` +
+  `!deployment/entrypoint.sh`. The reason the broad form gave for itself —
+  that per-file re-inclusion under an excluded parent is "a BuildKit
+  implementation detail" — is simply false; it is the documented `!` exception
+  and a scratch context proves it on docker 29.4. (2) `**/` means "zero or more
+  directory levels", so `**/.env` never matched a name merely _ending_ in
+  `.env`: `src/a.env` shipped. Added `**/*.env`, isolated by re-running the
+  narrowed context without it.
+- **`__tests__/docker-image.spec.ts` grew to 12 tests, and its outside control
+  is now a deep listing.** Three test-quality fixes from the same review:
+  `compilePattern` compiled `**/` to `.*` where moby uses
+  `((.*/)|([^/]*))` — a fail-open divergence invisible to every assertion in
+  the file, because the four cases it checked are correct under either
+  compilation; the observed-listing control was ten _top-level_ entries, so
+  `isExcluded` was only ever called with single-segment paths and the two rules
+  the file names (ancestor, last-match-wins) were graded solely against its own
+  synthetic cases; and a reachability assertion re-derived its expectation from
+  its own input, so only a duplicate entry could have failed it. There is now a
+  `matches BuildKit's own verdict` test whose every row is an observed
+  `docker build` outcome, including the four files that shipped under the old
+  shape.
 - **`tsx` moves from `devDependencies` to `dependencies`.** The crontab runs
   `npx tsx monitor.ts` and plexpi's parsons-pulse fuel producer runs
   `docker exec bluelinky-fuel-monitor npx tsx /app/status-json.ts`, so
@@ -30,11 +58,20 @@
   keeps the change inside this repo: the producer's command lives in homelab's
   `ansible/group_vars/plexpi/vars.yml`, and changing it would need a lockstep
   deploy with whichever side lands first broken until the other does.
+  **Two costs of that trade, neither of which the issue priced.** It forfeits
+  #25's own third promised benefit — "a stale-`tsx` surprise can no longer break
+  the hourly job" — because `tsx` is still resolved at runtime, just from a
+  different section. And this repo is a published npm library, so every consumer
+  of `bluelinky` now installs `tsx` + `esbuild` for a transpiler they never
+  call. No release has been cut since, so nothing has shipped; if the downstream
+  cost matters more than the cross-repo coupling, the remedy is the `dist/`
+  route the issue proposed, not a narrower dependency entry.
 - **Drop `RUN npm run build || true`.** Nothing in the container read the
   `dist/` it produced — `monitor.ts` imports `./src/index.ts` and
   `status-json.ts` imports `./src/status-json.ts`, both directly through tsx —
   and the `|| true` swallowed failures. The published-library build is
-  unaffected; `npm run build` still exists and the CD workflow still runs it.
+  unaffected; `npm run build` still exists, `ci.yaml`'s `build` job still runs it
+  on every push, and the publish path still runs it via `prepublishOnly`.
 - **`--production=false` → `--omit=dev`.** The old flag is the npm 6 spelling,
   accepted with a deprecation warning, and it asked for behaviour npm already
   had: devDependencies install by default unless `NODE_ENV=production`, which
@@ -52,6 +89,11 @@
   across deletion, comment-out, addition, negation, repositioning and structural
   axes, including a crontab switched to `npx ts-node` (a devDependency) and a
   second literal `FROM` defeating the single-base `ARG`.
+- **No `# syntax=docker/dockerfile:1` directive.** An earlier draft of this
+  change added one; it makes every cold build fetch a frontend image from Docker
+  Hub, on a box whose whole point is that an unattended `docker compose up -d --build` works. The only BuildKit feature here is the cache mount, and docker
+  29.4's built-in frontend honours it — measured `--no-cache` both ways, same
+  266 MB image, byte-identical file set.
 - Node 20 stays pinned, deliberately and now with a test saying so.
   `canadian.controller.ts` and `canadian.vehicle.ts` both branch on
   `process.versions.node >= 21`; plexpi's container reports v20.20.2, so

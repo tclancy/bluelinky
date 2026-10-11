@@ -48,27 +48,76 @@ const ENTRYPOINT = 'deployment/entrypoint.sh';
 const BUILD_TOOLCHAIN = ['python3', 'make', 'g++', 'gcc'];
 
 /**
- * `ls -A /app` from the image this branch builds, minus the two entries the
- * Dockerfile creates rather than copies (`node_modules` from the `deps` stage,
- * `state` from `mkdir`). Measured 2026-10-11 on
- * `docker build --platform linux/arm64`, re-verified against the final image
- * `sha256:18229a74` after the documentation changes.
+ * `find . -type f` from `/app` in the image this branch builds, excluding
+ * `node_modules/` and `state/` (the two trees the Dockerfile creates rather
+ * than copies). Measured 2026-10-11 on `docker build --platform linux/arm64`
+ * against the .dockerignore in this commit -- 49 files.
  *
  * This is the only thing here that ties the .dockerignore evaluator below to
  * Docker's real behaviour: the evaluator is our reimplementation of
  * last-match-wins glob semantics, and a reimplementation that is wrong in the
  * same direction as its own assertions proves nothing. Pinning an OBSERVED
  * listing makes the evaluator answerable to something outside itself.
+ *
+ * **It is a DEEP listing on purpose.** This was a top-level `ls -A /app` of ten
+ * entries, and the review caught what that cannot grade: the predictor built
+ * its input with `file.split('/')[0]`, so `isExcluded` was only ever called
+ * with single-segment paths and the two rules the comment above names -- the
+ * ancestor rule and last-match-wins -- were graded solely against the suite's
+ * own synthetic cases. Both of those rules only do anything at depth. The
+ * narrowing of `!deployment` to two named files in this same commit is the
+ * worked example: it changes nothing at the top level (BuildKit still
+ * materialises `deployment/` for the files inside it) and drops
+ * `deployment/README.md` one level down, which only a deep listing can see.
  */
-const MEASURED_APP_ENTRIES = [
+const MEASURED_IMAGE_FILES = [
   'alert-backends.ts',
-  'deployment',
+  'deployment/crontab',
+  'deployment/entrypoint.sh',
   'get-fuel-level.ts',
   'monitor-fuel.ts',
   'monitor.ts',
   'package-lock.json',
   'package.json',
-  'src',
+  'src/constants.ts',
+  'src/constants/america.ts',
+  'src/constants/australia.cfb.ts',
+  'src/constants/australia.ts',
+  'src/constants/canada.ts',
+  'src/constants/china.ts',
+  'src/constants/europe.cfb.ts',
+  'src/constants/europe.ts',
+  'src/constants/seatheatvent.ts',
+  'src/constants/stamps.ts',
+  'src/controllers/american.controller.ts',
+  'src/controllers/australia.controller.ts',
+  'src/controllers/authStrategies/australia.authStrategy.ts',
+  'src/controllers/authStrategies/authStrategy.ts',
+  'src/controllers/authStrategies/china.authStrategy.ts',
+  'src/controllers/authStrategies/chinese.legacyAuth.strategy.ts',
+  'src/controllers/authStrategies/european.brandAuth.strategy.ts',
+  'src/controllers/authStrategies/european.legacyAuth.strategy.ts',
+  'src/controllers/canadian.controller.ts',
+  'src/controllers/chinese.controller.ts',
+  'src/controllers/controller.ts',
+  'src/controllers/european.controller.ts',
+  'src/index.ts',
+  'src/interfaces/american.interfaces.ts',
+  'src/interfaces/chinese.interfaces.ts',
+  'src/interfaces/common.interfaces.ts',
+  'src/interfaces/european.interfaces.ts',
+  'src/logger.ts',
+  'src/monitor-helpers.ts',
+  'src/status-json.ts',
+  'src/tools/common.tools.ts',
+  'src/util.ts',
+  'src/vehicle-db.ts',
+  'src/vehicles/american.vehicle.ts',
+  'src/vehicles/australia.vehicle.ts',
+  'src/vehicles/canadian.vehicle.ts',
+  'src/vehicles/chinese.vehicle.ts',
+  'src/vehicles/european.vehicle.ts',
+  'src/vehicles/vehicle.ts',
   'status-json.ts',
   'tsconfig.json',
 ];
@@ -207,9 +256,26 @@ function compilePattern(raw: string): Pattern | null {
     const c = source[i];
     if (c === '*') {
       if (source[i + 1] === '*') {
-        re += '.*';
         i++;
-        if (source[i + 1] === '/') i++;
+        if (source[i + 1] === '/') {
+          // `**/` is "zero or more directory levels", which is moby's
+          // `((.*/)|([^/]*))` -- the second alternative is the zero-level case.
+          //
+          // It was `.*` here, which is the SAME alternation minus the trailing
+          // slash, and the difference is fail-open: `**/.env` compiled to
+          // `^.*\.env$`, so this evaluator said `src/a.env` and
+          // `deployment/creds.env` were excluded when real BuildKit ships both.
+          // Every assertion in the file stayed green because all four cases it
+          // checked (`.env`, `.env.local`, `.env.production`, `deployment/.env`)
+          // are correct either way -- i.e. the reimplementation was wrong in the
+          // same direction as its own assertions, which is the failure this
+          // file's header claims to have ruled out. The battery in
+          // `matches BuildKit's own glob semantics` is the control now.
+          i++;
+          re += '((.*/)|([^/]*))';
+        } else {
+          re += '.*';
+        }
       } else {
         re += '[^/]*';
       }
@@ -338,11 +404,16 @@ describe('runtime image content (issue #25)', () => {
     // Reachability: the toolchain must be installed SOMEWHERE, or this test
     // passes because nothing in the file installs anything and the detector is
     // never driven by the real Dockerfile at all.
+    //
+    // The literal set, not a self-derived one. This was
+    // `expect(found.sort()).toEqual(BUILD_TOOLCHAIN.sort().filter(t =>
+    // found.includes(t)))`, which re-derives its own expectation from its own
+    // input -- only a duplicate entry could ever have failed it, so the
+    // `.length > 0` line beside it was carrying the whole claim. `gcc` is
+    // absent on purpose: it is in BUILD_TOOLCHAIN so the final-stage sweep
+    // above refuses it, and the `deps` stage installs `g++` instead.
     const earlier = stages.slice(0, -1).flatMap(stage => stage.lines);
-    expect(earlier.flatMap(installsToolchain).sort()).toEqual(
-      [...BUILD_TOOLCHAIN].sort().filter(t => earlier.flatMap(installsToolchain).includes(t))
-    );
-    expect(earlier.flatMap(installsToolchain).length).toBeGreaterThan(0);
+    expect(earlier.flatMap(installsToolchain).sort()).toEqual(['g++', 'make', 'python3']);
 
     // Control: one per tool, driven individually. `g++` is the one a naive
     // regex drops, because `+` is a quantifier.
@@ -365,12 +436,19 @@ describe('runtime image content (issue #25)', () => {
     const runnable = stagesOf(body).flatMap(stage => stage.lines);
     expect(runnable.filter(line => /--production\b/.test(line))).toEqual([]);
 
-    // Control: the pattern fires on the retired flag, and spares the comment
-    // that explains why it is gone -- `stagesOf` strips comments, so a mutant
-    // that re-adds the flag inside the prose must NOT turn this red.
+    // Control: the pattern fires on the retired flag, and `stagesOf` strips
+    // comments, so a mutant that re-adds the flag inside the prose must NOT
+    // turn this red. Driven on a synthetic comment rather than on this file's
+    // own prose: `expect(body).toMatch(/--production=false/)` asserted that the
+    // explanatory comment still contains that exact string, which couples the
+    // suite to wording and goes red on a harmless reword.
     expect(/--production\b/.test('RUN npm ci --production=false')).toBe(true);
     expect(runnable.some(line => /--omit=dev/.test(line))).toBe(true);
-    expect(body).toMatch(/--production=false/); // the comment still names it
+    expect(
+      stagesOf('FROM x\n# RUN npm ci --production=false\nRUN npm ci --omit=dev')
+        .flatMap(stage => stage.lines)
+        .filter(line => /--production\b/.test(line))
+    ).toEqual([]);
   });
 
   it('runs no build step the container does not read', () => {
@@ -410,12 +488,47 @@ describe('runtime image content (issue #25)', () => {
   });
 
   it('excludes the credentials, the host dependency tree, and the dev-only files', () => {
-    for (const secret of ['.env', '.env.local', '.env.production', 'deployment/.env']) {
+    for (const secret of [
+      '.env',
+      '.env.local',
+      '.env.production',
+      'deployment/.env',
+      // The four below are the review's finding, and all four SHIPPED out of
+      // real BuildKit under the `!deployment` + `**/.env` shape this file had
+      // before this commit. Measured, not reasoned -- `FROM busybox` /
+      // `COPY . /ctx` / `find /ctx -type f` on docker 29.4:
+      //
+      //   /ctx/deployment/creds.env           <- shipped
+      //   /ctx/deployment/plexpi-secret.yaml  <- shipped
+      //   /ctx/src/a.env                      <- shipped
+      //
+      // Two independent fixes are needed and each was isolated against
+      // BuildKit on its own: narrowing `!deployment` to the two named files
+      // handles the first two, and `**/*.env` handles the third (re-running the
+      // narrowed context with that one line removed ships `src/a.env` again).
+      'deployment/creds.env',
+      'deployment/plexpi-secret.yaml',
+      'deployment/README.md',
+      'src/a.env',
+      'src/constants/x.env',
+    ]) {
       expect({ secret, excluded: isExcluded(secret, patterns) }).toEqual({
         secret,
         excluded: true,
       });
     }
+
+    // The honest limit of the allow-list, asserted so nobody has to discover it
+    // by shipping one. `!src` re-admits the whole library, so a NON-secrets-
+    // shaped new file under `src/` ships -- real BuildKit shipped
+    // `/ctx/src/credentials.json` in the same probe above, and still does.
+    // Pinned as `false` deliberately: if someone later makes `src/` fail-closed
+    // this test goes red and the `.dockerignore` header needs its caveat
+    // deleting.
+    expect({
+      known_gap: 'src/credentials.json',
+      excluded: isExcluded('src/credentials.json', patterns),
+    }).toEqual({ known_gap: 'src/credentials.json', excluded: false });
 
     // node_modules is load-bearing rather than hygiene: the runtime stage
     // copies a dev-free tree from `deps`, and `COPY . .` runs AFTER it, so a
@@ -486,14 +599,24 @@ describe('runtime image content (issue #25)', () => {
   it('predicts the image contents that were actually built', () => {
     // The evaluator above is our reimplementation of Docker's glob semantics.
     // Grade it against an OBSERVED listing from the built image rather than
-    // against more of its own assertions -- see MEASURED_APP_ENTRIES.
-    const topLevel = [...new Set(files.map(file => file.split('/')[0]))];
-    const predicted = topLevel.filter(entry => !isExcluded(entry, patterns)).sort();
+    // against more of its own assertions -- see MEASURED_IMAGE_FILES.
+    //
+    // Per FILE, not per top-level entry: the ancestor rule and last-match-wins
+    // only do anything at depth, so a top-level comparison calls `isExcluded`
+    // with single-segment paths exclusively and grades neither.
+    const predicted = files.filter(file => !isExcluded(file, patterns)).sort();
 
     // Exact correspondence, not membership: a too-permissive allow-list shows
     // up here as an extra entry, a too-strict one as a missing entry. A
     // `toContain` loop over the measured list would catch only the second.
-    expect(predicted).toEqual([...MEASURED_APP_ENTRIES].sort());
+    expect(predicted).toEqual([...MEASURED_IMAGE_FILES].sort());
+
+    // Reachability: the control is only a control if it is non-trivial and the
+    // evaluator is actually excluding things. An empty `files`, or an
+    // allow-list that admitted everything, would satisfy the equality above
+    // against a correspondingly empty or complete pin.
+    expect(predicted.length).toBeGreaterThan(40);
+    expect(files.length).toBeGreaterThan(predicted.length);
   });
 
   it('pins the node major that selects the Canadian got transport', () => {
@@ -545,5 +668,64 @@ describe('runtime image content (issue #25)', () => {
     // Comments and blanks contribute no patterns -- otherwise a prose line
     // mentioning `*` would silently deny everything.
     expect(of('# *\n\n!src')).toHaveLength(1);
+  });
+
+  it("matches BuildKit's own verdict on the cases that separate `**/` from `.*`", () => {
+    // Every row below is an OBSERVED BuildKit verdict, not a derivation. Each
+    // was produced on docker 29.4 with a scratch context, `FROM busybox`,
+    // `COPY . /ctx` and `RUN find /ctx -type f`, under the `.dockerignore`
+    // named in the row. This is the control the file header always claimed to
+    // have and did not: the previous outside control was a ten-entry top-level
+    // listing, which cannot reach any of these.
+    //
+    // `**/` is "zero or more directory levels" -- moby compiles it to
+    // `((.*/)|([^/]*))`. It was `.*` here, which matches a BARE SUFFIX too, so
+    // this evaluator called `src/a.env` excluded while BuildKit shipped it. The
+    // divergence was fail-open and invisible, because the four cases the suite
+    // did assert are correct under either compilation.
+    const IGNORE_BROAD = '*\n!src\n!deployment\n.env\n.env.*\n**/.env\n**/.env.*';
+    const IGNORE_NARROW =
+      '*\n!src\n!deployment/crontab\n!deployment/entrypoint.sh\n' +
+      '.env\n.env.*\n**/.env\n**/.env.*\n**/*.env';
+    const IGNORE_NARROW_NO_SUFFIX_RULE =
+      '*\n!src\n!deployment/crontab\n!deployment/entrypoint.sh\n' +
+      '.env\n.env.*\n**/.env\n**/.env.*';
+
+    const observed: Array<[string, string, boolean]> = [
+      // ignore body, path, BuildKit excluded it?
+      [IGNORE_BROAD, '.env', true],
+      [IGNORE_BROAD, '.env.production', true],
+      [IGNORE_BROAD, 'deployment/.env', true],
+      [IGNORE_BROAD, 'README.md', true],
+      // The four that shipped. These are the whole point of this test.
+      [IGNORE_BROAD, 'deployment/creds.env', false],
+      [IGNORE_BROAD, 'deployment/plexpi-secret.yaml', false],
+      [IGNORE_BROAD, 'src/a.env', false],
+      [IGNORE_BROAD, 'src/credentials.json', false],
+      // Per-file re-inclusion under an excluded parent WORKS -- it is the
+      // documented `!` exception, not an implementation detail, which is what
+      // the old `!deployment` comment claimed in order to justify itself.
+      [IGNORE_NARROW, 'deployment/crontab', false],
+      [IGNORE_NARROW, 'deployment/entrypoint.sh', false],
+      [IGNORE_NARROW, 'deployment/creds.env', true],
+      [IGNORE_NARROW, 'deployment/plexpi-secret.yaml', true],
+      [IGNORE_NARROW, 'src/a.env', true],
+      [IGNORE_NARROW, 'src/index.ts', false],
+      // `**/*.env` isolated: drop that one line and `src/a.env` ships again.
+      [IGNORE_NARROW_NO_SUFFIX_RULE, 'src/a.env', false],
+    ];
+
+    for (const [ignore, target, buildkitExcluded] of observed) {
+      expect({ target, excluded: isExcluded(target, compileIgnore(ignore)) }).toEqual({
+        target,
+        excluded: buildkitExcluded,
+      });
+    }
+
+    // Reachability, so a table of all-`true` or all-`false` rows cannot pass as
+    // agreement. Both verdicts have to be represented or this proves nothing
+    // about the evaluator's ability to say "no".
+    expect(observed.some(([, , excluded]) => excluded)).toBe(true);
+    expect(observed.some(([, , excluded]) => !excluded)).toBe(true);
   });
 });

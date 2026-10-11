@@ -395,14 +395,33 @@ invocation turns that suite red instead of the hourly job.
 edit.** `npm ci` requires both `package.json` and `package-lock.json`, so the
 install layer's cache key is the content of both -- in this layout exactly as in
 the old one. The 13-minute install on 2026-10-10 was _not_ a lockfile change:
-PR #20 touched `package.json` only (+1 -0), and the lockfile had not moved since
-April. So any one-line edit to `package.json` -- a new npm script, a version
+PR #20 touched `package.json` only (+1 -0), and at that point the lockfile had
+not moved since `98ab73c` on 2026-04-15. It _has_ moved since — `10fb15e`
+(PR #29, −473 lines, 2026-10-11) — so the first build after that merge re-runs
+the install for a reason unrelated to this change. So any one-line edit to `package.json` -- a new npm script, a version
 bump -- still re-runs the install. The build now mounts npm's cache
 (`RUN --mount=type=cache,target=/root/.npm`), which means that re-run resolves
 against a warm cache instead of re-downloading the tree; how much that is worth
 on a 905 MB aarch64 box is not yet measured, and plexpi's first post-merge
 `package.json` edit is what will settle it. Building the image somewhere other
 than plexpi is what would remove the problem rather than soften it.
+
+**One benefit the issue promised and this does NOT deliver.** #25's third net
+effect was "a stale-`tsx` surprise can no longer break the hourly job". Keeping
+the crontab on `npx tsx` forfeits it: `tsx` is still resolved at runtime, it has
+just moved from `devDependencies` to `dependencies`. The trade was taken because
+switching the invocation to a compiled `dist/` entry needs a lockstep **homelab**
+deploy (`ansible/group_vars/plexpi/vars.yml` names `npx tsx /app/status-json.ts`
+verbatim), with whichever side lands first broken until the other catches up.
+It is reversible in one line here plus one there.
+
+**`tsx` in `dependencies` has a cost outside this deployment.** This repo is also
+a published npm library (`main: dist/index.cjs`, and
+`.github/workflows/npmpublish.yaml` publishes on `release: published`), so every
+consumer of `bluelinky` now installs `tsx` and `esbuild` for a transpiler they
+never call. No release has been cut since, so nothing has shipped yet. If that
+matters more than the cross-repo coupling above, the fix is the `dist/` route the
+issue originally proposed, not a narrower dependency entry.
 
 **Node 20 is pinned deliberately, and bumping it is a behaviour change.**
 `src/controllers/canadian.controller.ts` and `src/vehicles/canadian.vehicle.ts`
