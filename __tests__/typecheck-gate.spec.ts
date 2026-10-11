@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import ts from 'typescript';
 
 /**
  * Pins the typecheck gate to something that actually runs.
@@ -44,10 +45,18 @@ const COVERED_ENTRY_POINTS = [
 ];
 
 describe('the typecheck gate', () => {
-  it('reachability control: all three files exist and are non-empty', () => {
+  it('reachability control: the three config files AND every covered entry point exist', () => {
     // Every assertion below reads one of these. If a rename or a move left one
     // missing, they must fail here rather than pass against an empty string.
-    for (const file of [CONFIG, PACKAGE, WORKFLOW]) {
+    //
+    // The entry points are in this loop because a non-glob `include` entry that
+    // matches nothing is **silently ignored** by tsc -- no `TS6053`, no "no
+    // inputs found". Measured: renaming `status-json.ts` away leaves
+    // `tsc -p tsconfig.typecheck.json` at rc=0 and the whole suite green. The
+    // resolved-set test below is what actually catches that; this loop is here
+    // so the failure names the missing file instead of a set difference.
+    const entryPoints = COVERED_ENTRY_POINTS.map(entry => path.join(ROOT, entry));
+    for (const file of [CONFIG, PACKAGE, WORKFLOW, ...entryPoints]) {
       expect(fs.existsSync(file)).toBe(true);
       expect(fs.readFileSync(file, 'utf8').trim().length).toBeGreaterThan(0);
     }
@@ -71,9 +80,10 @@ describe('the typecheck gate', () => {
       .map(item => item.trim().replace(/^"/, '').replace(/"$/, ''))
       .filter(item => item !== '');
 
-    // Control on the control: a regex that matched nothing would make the
-    // assertions below fail, but a regex that matched an EMPTY list would too
-    // -- and this is the assertion that tells those apart from a real removal.
+    // Fail-fast on the count. Set equality below subsumes this -- no input can
+    // fail the count without also failing the set -- but it fires first and
+    // `Received: 4` reads better than a set difference. A null match is already
+    // ruled out two lines up, so this is about the message, not the coverage.
     expect(entries.length).toBeGreaterThanOrEqual(COVERED_ENTRY_POINTS.length + 1);
     expect(entries).toContain('src');
 
@@ -85,6 +95,44 @@ describe('the typecheck gate', () => {
     expect(new Set(entries.filter(entry => entry !== 'src'))).toEqual(
       new Set(COVERED_ENTRY_POINTS)
     );
+  });
+
+  it('RESOLVES every covered entry point, not merely lists it', () => {
+    // The assertion above reads the `include` TEXT, and the text is not the
+    // gate. Three one-line edits make tsc stop reading a file while leaving
+    // that list untouched, all measured on this tree:
+    //
+    //   "exclude": ["monitor-fuel.ts"]   -> 0 resolved, injected error invisible
+    //   the same entry in tsconfig.json  -> inherited through `extends`
+    //   renaming the file                -> include entry matches nothing, rc=0
+    //
+    // In all three the config still lists the file, tsc still exits 0, and
+    // every gate in this repo still passes. So this test asks TypeScript's own
+    // config reader what the project actually resolves to -- which covers
+    // `exclude`, `extends`, `files` and a rename in one assertion, and reads
+    // JSONC natively instead of through the regex above.
+    const parsed = ts.getParsedCommandLineOfConfigFile(
+      CONFIG,
+      {},
+      {
+        ...ts.sys,
+        onUnRecoverableConfigFileDiagnostic: diagnostic => {
+          throw new Error(ts.flattenDiagnosticMessageText(diagnostic.messageText, ' '));
+        },
+      }
+    );
+    expect(parsed).toBeDefined();
+
+    const resolved = parsed!.fileNames.map(file => path.resolve(file));
+
+    // Reachability control: a parse that resolved nothing would make every
+    // `toContain` below fail, and would do it for a reason unrelated to
+    // coverage. `src` alone is a dozen files, so this floor is slack on purpose.
+    expect(resolved.length).toBeGreaterThan(COVERED_ENTRY_POINTS.length);
+
+    for (const entry of COVERED_ENTRY_POINTS) {
+      expect(resolved).toContain(path.join(ROOT, entry));
+    }
   });
 
   it('is invoked by an npm script, which is invoked by CI', () => {
