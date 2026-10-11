@@ -1,5 +1,66 @@
 # Changelog
 
+## 2026-10-11
+
+- **Two-stage Dockerfile.** The runtime image no longer carries the dev
+  toolchain. A `deps` stage runs `npm ci --omit=dev` with `python3 make g++`
+  available; the runtime stage installs only `cron` and copies the dev-free
+  tree across. Measured on the live plexpi image before the change: 1.22 GB,
+  458 top-level `node_modules` directories, with `jest`, `rollup`, `eslint`,
+  `typescript` and `prettier` in the runtime filesystem alongside `python3`,
+  `make` and `g++`. After: **266 MB, 158 directories, none of those present.**
+  `better-sqlite3`'s native addon loads and does a real SQLite roundtrip under
+  the slimmed tree, and both `monitor.ts` and `status-json.ts` run (issue #25).
+- **Add `.dockerignore` — this is a credential fix, not hygiene.** `COPY . .`
+  ran with no `.dockerignore` in the repo at all, so every build baked
+  `/app/.env` into an image layer: 460 bytes, dated Apr 10 2026, carrying
+  `BLUELINK_USERNAME`, `BLUELINK_PASSWORD`, `BLUELINK_PIN` and the ntfy
+  credentials. `docker-compose.yml` mounts the real file over it at runtime, so
+  it never surfaced; `docker save` and `docker history` read it regardless. The
+  new file is an **allow-list** — it denies everything and re-admits only what
+  the runtime needs, so a new secret at the repo root is excluded by default
+  rather than on somebody remembering. Excluding `node_modules` is load-bearing
+  too: the runtime stage copies a dev-free tree from `deps` and `COPY . .` runs
+  after it, so a host `node_modules` in the context would overwrite it.
+- **`tsx` moves from `devDependencies` to `dependencies`.** The crontab runs
+  `npx tsx monitor.ts` and plexpi's parsons-pulse fuel producer runs
+  `docker exec bluelinky-fuel-monitor npx tsx /app/status-json.ts`, so
+  `--omit=dev` would otherwise strip the interpreter both of them need. Keeping
+  the invocation on `tsx` rather than switching to a compiled `dist/` entry also
+  keeps the change inside this repo: the producer's command lives in homelab's
+  `ansible/group_vars/plexpi/vars.yml`, and changing it would need a lockstep
+  deploy with whichever side lands first broken until the other does.
+- **Drop `RUN npm run build || true`.** Nothing in the container read the
+  `dist/` it produced — `monitor.ts` imports `./src/index.ts` and
+  `status-json.ts` imports `./src/status-json.ts`, both directly through tsx —
+  and the `|| true` swallowed failures. The published-library build is
+  unaffected; `npm run build` still exists and the CD workflow still runs it.
+- **`--production=false` → `--omit=dev`.** The old flag is the npm 6 spelling,
+  accepted with a deprecation warning, and it asked for behaviour npm already
+  had: devDependencies install by default unless `NODE_ENV=production`, which
+  nothing here sets. It was defending against nothing while reading like a
+  decision.
+- Add `__tests__/docker-image.spec.ts` (11 tests). It asserts on the Dockerfile
+  and the build context — the inputs that decide image content — rather than on
+  `npm ls --omit=dev`, because that query answers a different question: run
+  against the live 1.22 GB image with every dev tool present it printed exactly
+  the six runtime dependencies, so issue #25's second success criterion was
+  already true of the broken image. The suite evaluates `.dockerignore` with
+  Docker's last-match-wins and ancestor rules and grades its prediction against
+  an **observed** `ls -A /app` from the built image, so the reimplementation is
+  answerable to something outside its own assertions. 21/21 mutants killed
+  across deletion, comment-out, addition, negation, repositioning and structural
+  axes, including a crontab switched to `npx ts-node` (a devDependency) and a
+  second literal `FROM` defeating the single-base `ARG`.
+- Node 20 stays pinned, deliberately and now with a test saying so.
+  `canadian.controller.ts` and `canadian.vehicle.ts` both branch on
+  `process.versions.node >= 21`; plexpi's container reports v20.20.2, so
+  production runs the `got` arm, which is also the arm CI pins. Node 20 is past
+  end-of-life and the pin should move, but that is a production transport switch
+  and issue #32 lists four behavioural divergences between the arms — it wants
+  its own change, behind #30 and #32, with the switch as the headline rather
+  than as a rider on an image refactor.
+
 ## 2026-10-08
 
 - Move the tracked compose file from `deployment/docker-compose.yml` to the

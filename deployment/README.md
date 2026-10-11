@@ -345,7 +345,73 @@ into the image, so `docker compose restart` re-runs the old code with a
 straight face. The named volume `bluelinky_fuel-state` survives the recreate,
 which is what keeps the alert state and the history.
 
-**Note:** The `.env` file is gitignored, so your credentials are safe during updates.
+**Note:** The `.env` file is gitignored, so it is not committed. Until issue #25
+it was still **baked into the image**: `COPY . .` ran with no `.dockerignore` in
+the repo at all, so every build copied `/app/.env` into a layer. Measured on the
+live plexpi image on 2026-10-11 -- 460 bytes, dated Apr 10 2026, carrying
+`BLUELINK_USERNAME`, `BLUELINK_PASSWORD`, `BLUELINK_PIN` and the ntfy
+credentials. `docker-compose.yml` mounts the real file over it at runtime, so it
+never surfaced in normal use; `docker save` and `docker history` read it
+regardless, and it would travel with the image to any registry.
+
+The repo now has a `.dockerignore`, and it is an **allow-list**: it denies
+everything and re-admits only what the runtime needs, so the default for a new
+file at the repo root is "not in the image". Verify after a rebuild:
+
+```bash
+# Expect: No such file or directory
+ssh plexclaude 'docker run --rm --entrypoint sh bluelinky-fuel-monitor:latest -c "ls -la /app/.env"'
+```
+
+## What the image contains (and what it deliberately does not)
+
+The image is built in two stages, and the split is about CONTENT rather than
+build speed. Before issue #25 it was a single stage running
+`npm ci --production=false`, which measured on plexpi on 2026-10-11 as:
+
+|                                                          | before                                              | after      |
+| -------------------------------------------------------- | --------------------------------------------------- | ---------- |
+| image size                                               | 1.22 GB                                             | 266 MB     |
+| top-level `node_modules` dirs                            | 458                                                 | 158        |
+| `jest` / `rollup` / `eslint` / `typescript` / `prettier` | all present                                         | all absent |
+| `python3` / `make` / `g++`                               | present                                             | absent     |
+| `/app/.env`                                              | **baked into a layer**                              | absent     |
+| `/app/dist`                                              | built by `npm run build \|\| true`, read by nothing | not built  |
+
+The `deps` stage installs `npm ci --omit=dev` with the compiler toolchain
+available, so a missing `better-sqlite3` prebuild degrades to a slow build
+rather than a failed one. The runtime stage installs `cron`, copies that
+dev-free tree across, and never sees a compiler.
+
+**`tsx` is a runtime dependency, not a devDependency.** The crontab runs
+`npx tsx monitor.ts` and plexpi's parsons-pulse fuel producer runs
+`docker exec bluelinky-fuel-monitor npx tsx /app/status-json.ts`, so
+`--omit=dev` would otherwise strip the interpreter both of them need.
+`__tests__/docker-image.spec.ts` derives that requirement from this directory's
+own `crontab` and `entrypoint.sh` rather than hardcoding `tsx`, so changing the
+invocation turns that suite red instead of the hourly job.
+
+**What the two stages do NOT fix: the rebuild time after a `package.json`
+edit.** `npm ci` requires both `package.json` and `package-lock.json`, so the
+install layer's cache key is the content of both -- in this layout exactly as in
+the old one. The 13-minute install on 2026-10-10 was _not_ a lockfile change:
+PR #20 touched `package.json` only (+1 -0), and the lockfile had not moved since
+April. So any one-line edit to `package.json` -- a new npm script, a version
+bump -- still re-runs the install. The build now mounts npm's cache
+(`RUN --mount=type=cache,target=/root/.npm`), which means that re-run resolves
+against a warm cache instead of re-downloading the tree; how much that is worth
+on a 905 MB aarch64 box is not yet measured, and plexpi's first post-merge
+`package.json` edit is what will settle it. Building the image somewhere other
+than plexpi is what would remove the problem rather than soften it.
+
+**Node 20 is pinned deliberately, and bumping it is a behaviour change.**
+`src/controllers/canadian.controller.ts` and `src/vehicles/canadian.vehicle.ts`
+both branch on `process.versions.node >= 21`: below it the Canadian region uses
+`got`, at or above it undici's `fetch`. plexpi's container reports v20.20.2, so
+production runs the `got` arm today -- the same arm CI pins. Node 20 is past
+end-of-life (2026-04-30) and the pin should move, but that is a production
+transport switch and issue #32 documents four behavioural divergences between
+the two arms. It wants its own change, behind #30 and #32.
 
 ## Stopping the Monitor
 
@@ -491,13 +557,19 @@ docker exec bluelinky-fuel-monitor /bin/bash -c 'echo "{\"alert50Sent\":false,\"
 
 - Docker Engine 20.10+
 - The `docker compose` plugin (v2+); the hyphenated v1 binary is not used
-- ~500MB disk space for container and images
-- Internet connection for Bluelink API and Twilio API
+- ~1GB disk space for the image, its build cache and the state volume. The image
+  itself is 266 MB as of issue #25 (it was 1.22 GB before); BuildKit's cache is
+  the part that grows, and `docker system df` on plexpi showed 32.6 GB of it on
+  2026-10-11.
+- Internet connection for the Bluelink API and the configured alert backend
 
 **The container provides:**
 
-- Node.js 20
-- All npm dependencies
+- Node.js 20 (pinned -- see "What the image contains" above; this is the version
+  that selects the Canadian `got` transport)
+- The runtime npm dependencies only: `better-sqlite3`, `got`, `push-receiver`,
+  `tough-cookie`, `tsx`, `undici`, `winston`. The lint, test and bundling
+  toolchain is not in the image.
 - cron daemon
 - All TypeScript files
 - Isolated filesystem
