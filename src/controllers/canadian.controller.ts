@@ -10,6 +10,7 @@ import { SessionController } from './controller';
 import logger from '../logger';
 import { VehicleRegisterOptions } from '../interfaces/common.interfaces';
 import { manageBluelinkyError } from '../tools/common.tools';
+import { shouldUseFetchTransport } from '../tools/runtime.tools';
 
 export interface CanadianBlueLinkyConfig extends BlueLinkyConfig {
   region: 'CA';
@@ -17,6 +18,15 @@ export interface CanadianBlueLinkyConfig extends BlueLinkyConfig {
 
 export class CanadianController extends SessionController<CanadianBlueLinkyConfig> {
   private _environment: CanadianBrandEnvironment;
+
+  /**
+   * Which HTTP transport the Canadian region uses — `fetch` (undici) or `got`.
+   *
+   * Resolved once from the running interpreter and shared by this controller
+   * and every `CanadianVehicle` it owns, so the two request paths cannot
+   * disagree. Settable so a test can exercise either arm on any Node (#26).
+   */
+  public useFetchTransport: boolean = shouldUseFetchTransport();
 
   constructor(userConfig: CanadianBlueLinkyConfig) {
     super(userConfig);
@@ -113,10 +123,9 @@ export class CanadianController extends SessionController<CanadianBlueLinkyConfi
   /* eslint-disable @typescript-eslint/no-explicit-any */
   private async request(endpoint, body: any, headers: any = {}): Promise<any | null> {
     logger.debug(`[${endpoint}] ${JSON.stringify(headers)} ${JSON.stringify(body)}`);
-    const [major, ,] = process.versions.node.split('.').map(Number);
-    if (major >= 21) {
+    if (this.useFetchTransport) {
       process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-      logger.debug('Node version >= 21, using fetch instead of got');
+      logger.debug('Using fetch instead of got');
       const options = {
         method: 'POST',
         body: JSON.stringify(body),
