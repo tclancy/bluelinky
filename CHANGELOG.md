@@ -9,9 +9,10 @@
   in the process made skipped certificate verification for the life of that
   process, including the US Bluelink calls `monitor.ts` makes hourly and the
   outdoor-temperature `fetch` in `monitor-helpers.ts`, which carries no
-  dispatcher of its own. The per-request undici `Agent` four lines below each
-  assignment already did the same relaxation scoped to the one request, so this
-  is a deletion rather than a rewrite. Latent, not live: `BLUELINK_REGION`
+  dispatcher of its own. The per-request undici `Agent` in the same request
+  options -- fifteen lines below each assignment, not four as #37 and #32 both
+  say -- already did the same relaxation scoped to the one request, so this is a
+  deletion rather than a rewrite. Latent, not live: `BLUELINK_REGION`
   defaults to `US` and nothing selects `CA`, so the lines never executed in the
   deployment — they did execute on any node >= 21 running the test suite
   (issue #37).

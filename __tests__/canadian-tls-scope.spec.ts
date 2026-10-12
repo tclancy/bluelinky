@@ -8,8 +8,10 @@
  * including the US calls `monitor.ts` actually makes and the plain `fetch()` in
  * `monitor-helpers.ts`, which carries no dispatcher of its own.
  *
- * The scoped replacement already existed four lines below each assignment: the
- * per-request undici `Agent` with `connect.rejectUnauthorized: false`. These
+ * The scoped replacement already existed in the same request options, fifteen
+ * lines below each assignment: the per-request undici `Agent` with
+ * `connect.rejectUnauthorized: false`. (Issues #37 and #32 both say "four
+ * lines"; measured on `main` it is 118 -> 133 and 382 -> 398.) These
  * tests pin both halves -- the global must stay untouched, AND the scoped
  * bypass must still be there, so the env var cannot be "fixed" by deleting the
  * Agent and breaking the handshake instead.
@@ -194,6 +196,10 @@ describe('the got transport arm leaves TLS verification alone too (#37)', () => 
       .lock()
       .catch(() => undefined); // the got mock resolves undefined; the throw is not what we measure
 
+    // Per-path control. Without it, flipping only the VEHICLE's gate to always
+    // fetch leaves this green and the vehicle's got arm unproven -- the
+    // controller's control above cannot speak for it.
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(TLS_VAR in process.env).toBe(false);
   });
 });
@@ -209,36 +215,66 @@ describe('the got transport arm leaves TLS verification alone too (#37)', () => 
  * `Object.assign(process.env, { NODE_TLS_REJECT_UNAUTHORIZED: '0' })`, which do
  * the same thing. Every spelling that reaches the variable has to name it.
  *
- * The one hole left, stated rather than papered over: a fully computed key
- * (`process.env[someVariable]`) names nothing and is invisible here. The
- * behavioural suites are what cover the paths that matter.
+ * Two consequences worth stating rather than papering over.
+ *
+ * It is a text scan, so it counts a *commented-out* assignment as a violation,
+ * and it also rejects #37's own sanctioned fallback -- save the prior value,
+ * set it, restore it in a `finally` around the one request. That fallback is
+ * only needed if some Canadian request bypasses the dispatcher, and none does:
+ * both `fetch` call sites in the arm pass it, and undici carries
+ * `fetchParams.controller.dispatcher` through redirect follow-ups. Should that
+ * ever stop being true, this test is the thing to change, deliberately, rather
+ * than the obstacle to work around.
+ *
+ * And a fully computed key (`process.env[someVariable]`) names nothing, so it
+ * is invisible here. The behavioural suites are what cover the paths that
+ * matter.
  */
 describe('no shipped source file names the process-wide TLS switch (#37)', () => {
-  const TS_SOURCE_DIRS = ['src', 'scripts'];
-  const TS_SOURCE_ROOT_FILES = [
-    'alert-backends.ts',
-    'debug.ts',
-    'get-fuel-level.ts',
-    'monitor-fuel.ts',
-    'monitor.ts',
-    'status-json.ts',
-  ];
+  const SOURCE_DIRS = ['src', 'scripts'];
+  const SOURCE_EXTENSIONS = ['.ts', '.js', '.cjs', '.mjs'];
 
-  /** Measured on `main` at the time of #37. The tree may grow, never shrink below this. */
-  const MIN_FILES_SCANNED = 45;
+  /**
+   * Measured on `main` at the time of #37 by running this file's own walk: 42
+   * under `src` + `scripts`, plus 10 at the root -- 6 entry scripts and 4
+   * configs (`.eslintrc.cjs` counts; `readdirSync` returns dotfiles). The tree
+   * may grow, never shrink below this.
+   */
+  const MIN_FILES_SCANNED = 52;
+
+  const isSource = (name: string): boolean =>
+    SOURCE_EXTENSIONS.some(extension => name.endsWith(extension));
 
   const walk = (dir: string): string[] =>
     fs.readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) return walk(full);
-      return entry.isFile() && full.endsWith('.ts') ? [full] : [];
+      return entry.isFile() && isSource(entry.name) ? [full] : [];
     });
+
+  /**
+   * Derived, never listed. A hardcoded roster of root entry scripts is blind to
+   * the next one added, and this repo grows them as a habit -- `monitor.ts`,
+   * `monitor-fuel.ts`, `status-json.ts`, `get-fuel-level.ts` and
+   * `alert-backends.ts` each arrived separately. The floor below is `>=`, so it
+   * can never catch an unscanned newcomer either.
+   *
+   * Non-`.ts` root files are in scope deliberately: `jest.config.cjs` already
+   * sets `process.env.LOG_LEVEL` and executes inside the test process, which
+   * makes it the one place the variable could be set with every test still
+   * green.
+   */
+  const rootSourceFiles = (): string[] =>
+    fs
+      .readdirSync(REPO_ROOT, { withFileTypes: true })
+      .filter(entry => entry.isFile() && isSource(entry.name))
+      .map(entry => entry.name);
 
   const namesTheSwitch = (source: string): boolean => source.includes(TLS_VAR);
 
   const scanned: { relative: string; source: string }[] = [
-    ...TS_SOURCE_DIRS.flatMap(dir => walk(path.join(REPO_ROOT, dir))),
-    ...TS_SOURCE_ROOT_FILES.map(file => path.join(REPO_ROOT, file)),
+    ...SOURCE_DIRS.flatMap(dir => walk(path.join(REPO_ROOT, dir))),
+    ...rootSourceFiles().map(file => path.join(REPO_ROOT, file)),
   ].map(absolute => ({
     relative: path.relative(REPO_ROOT, absolute),
     source: fs.readFileSync(absolute, 'utf8'),
@@ -258,6 +294,12 @@ describe('no shipped source file names the process-wide TLS switch (#37)', () =>
     const relatives = scanned.map(file => file.relative);
     expect(relatives).toContain(path.join('src', 'controllers', 'canadian.controller.ts'));
     expect(relatives).toContain(path.join('src', 'vehicles', 'canadian.vehicle.ts'));
+
+    // The root list is derived rather than enumerated, so every entry script
+    // and every root config file that executes is in scope by construction.
+    expect(relatives).toContain('monitor.ts');
+    expect(relatives).toContain('jest.config.cjs');
+
     expect(scanned.length).toBeGreaterThanOrEqual(MIN_FILES_SCANNED);
     for (const file of scanned) {
       expect(file.source.length).toBeGreaterThan(0);
@@ -269,6 +311,8 @@ describe('no shipped source file names the process-wide TLS switch (#37)', () =>
       .filter(file => namesTheSwitch(file.source))
       .map(file => file.relative);
 
+    // A comment naming the variable counts, and so does a `finally`-scoped
+    // save/restore. Read the docblock above before relaxing this.
     expect(offenders).toEqual([]);
   });
 });
