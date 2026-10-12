@@ -16,12 +16,17 @@
   //
   // `scripts` joined the covered set in #27 -- it was the fourth of those paths
   // and the only one already at 0 errors, held out of #19 solely to keep that
-  // diff to the file it was named for. It is the first DIRECTORY entry here,
-  // and a directory is covered differently from a file: tsc expands it to
-  // `scripts/**/*`, so `fileNames` contains the three `.ts` files under it and
-  // never the directory path itself. The spec enumerates that directory from
-  // disk rather than hard-coding its contents, so a script added tomorrow is
-  // required to resolve without anyone editing a list.
+  // diff to the file it was named for. It is the first directory entry inside
+  // `COVERED_ENTRY_POINTS`; `src` below is a directory too, but it is held out
+  // of that list on purpose, so no per-entry assertion had been pointed at a
+  // directory before. A directory is covered differently from a file: tsc
+  // expands it to `scripts/**/*`, so `fileNames` contains the three `.ts` files
+  // under it and never the directory path itself. The spec enumerates the
+  // directory from disk rather than hard-coding its contents, and asserts that
+  // enumeration as a SET against what tsc resolved under it -- so a script
+  // added tomorrow is required to resolve without anyone editing a list, and an
+  // extension the spec's walk does not know about is a red test rather than a
+  // file nothing asserts.
   //
   // `monitor-fuel.ts` joined the covered set in #19. It was held out for the
   // three `TS2345` errors PR #21 fixed, and nothing else -- its whole import
@@ -31,7 +36,10 @@
   // ADDING AN ENTRY BELOW IS A TWO-FILE EDIT. `COVERED_ENTRY_POINTS` in
   // `__tests__/typecheck-gate.spec.ts` is asserted as a SET against this list,
   // so an entry added here alone turns a test you did not touch red. That is
-  // the review hook, not a bug.
+  // the review hook, not a bug. And keep comments OUT of the array itself: that
+  // assertion reads the list as text and drops whole comment lines, so a
+  // trailing `// why` beside an entry survives into the parsed set as a bogus
+  // member and fails a config that is correct.
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,

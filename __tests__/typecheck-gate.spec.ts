@@ -52,40 +52,85 @@ const COVERED_ENTRY_POINTS = [
   'scripts',
 ];
 
-/** Extensions tsc resolves for a directory entry when `allowJs` is off. */
-const TS_EXTENSIONS = ['.ts', '.tsx'];
+/**
+ * Extensions tsc resolves for a directory entry, with `allowJs` off.
+ *
+ * Measured against the pinned typescript 5.4.3 rather than assumed: a
+ * directory entry resolves `.ts`, `.tsx`, `.mts`, `.cts` and the `.d.*`
+ * declaration form of each. The declaration forms need no entry of their own
+ * -- `.d.mts` ends with `.mts` -- but `.mts` and `.cts` do, and a two-element
+ * `['.ts', '.tsx']` list is precisely the hole this comment exists to close:
+ * a `.mts` script is typechecked by tsc, asserted by nobody, and can then be
+ * `exclude`d with the whole suite still green. `ts.getSupportedExtensions` is
+ * not public API, so this list is maintained by hand -- which is why the
+ * directory expansion is asserted as a SET further down. An extension this
+ * list has not heard of is a red test rather than a silent gap.
+ */
+const TS_EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts'];
 
-/** Every `.ts`/`.tsx` file under `dir`, recursively, absolute. */
+/**
+ * Directory names tsc's expansion never descends into, so this walk must not
+ * either. Measured on 5.4.3: with `scripts` in `include`,
+ * `scripts/node_modules/nm.ts` and `scripts/.hidden/hid.ts` are absent from
+ * `fileNames` while `scripts/plain.ts` is present. Over-capturing is not
+ * harmless once the expansion is compared as a set -- it reads as a coverage
+ * failure naming a file tsc was never going to look at.
+ */
+const NEVER_GLOBBED = ['node_modules', 'bower_components', 'jspm_packages'];
+
+/** Every file under `dir` that tsc's directory expansion resolves, absolute. */
 function typeScriptFilesUnder(dir: string): string[] {
   return fs
     .readdirSync(dir, { withFileTypes: true })
     .flatMap(item => {
+      // A leading dot is skipped by tsc at every depth, file or directory.
+      if (item.name.startsWith('.')) return [];
       const full = path.join(dir, item.name);
-      if (item.isDirectory()) return typeScriptFilesUnder(full);
+      // `statSync`, not `item.isDirectory()`: a Dirent for a SYMLINK to a
+      // directory reports `isDirectory() === false`, and tsc follows it --
+      // measured, a symlinked subdirectory's `.ts` files are in `fileNames`.
+      // Reading the Dirent skips a whole covered subtree, and does it quietly.
+      if (fs.statSync(full).isDirectory()) {
+        return NEVER_GLOBBED.includes(item.name) ? [] : typeScriptFilesUnder(full);
+      }
       return TS_EXTENSIONS.some(ext => item.name.endsWith(ext)) ? [full] : [];
     })
     .sort();
 }
 
+/** Is this `include` entry a directory on disk? */
+function isDirectoryEntry(entry: string): boolean {
+  const target = path.join(ROOT, entry);
+  return fs.existsSync(target) && fs.statSync(target).isDirectory();
+}
+
 /**
  * The concrete files tsc has to resolve for one `include` entry.
  *
- * `scripts` is the first directory entry in the config, and a directory is
- * covered differently from a file: tsc expands the entry to `scripts/**\/*` and
- * puts the files under it in `fileNames` -- the directory path itself never
- * appears there. So asserting `fileNames` contains `<root>/scripts` cannot
- * pass, and relaxing the assertion until it does is how a directory entry ends
- * up unguarded. This expands it instead.
+ * A directory is covered differently from a file: tsc expands `scripts` to
+ * `scripts/**\/*` and puts the files under it in `fileNames` -- the directory
+ * path itself never appears there. So asserting `fileNames` contains
+ * `<root>/scripts` cannot pass, and relaxing the assertion until it does is
+ * how a directory entry ends up listed and unguarded. This expands it instead.
+ *
+ * `src` is a directory entry too and always has been. What #27 added is a
+ * directory inside `COVERED_ENTRY_POINTS`: `src` is deliberately held out of
+ * that list and covered only by the slack `resolved.length` floor, so until
+ * now no per-entry assertion had ever been pointed at a directory. Do not read
+ * this as an argument for adding `src` to the list -- that would turn a floor
+ * chosen on purpose into a file-by-file contract over the whole source tree.
  *
  * The expansion is read from DISK, not hard-coded. A list of the three scripts
  * that exist today would be a floor: a fourth script, or an `exclude` naming
- * only the fourth, would be invisible to it. Reading the directory means the
- * assertion's breadth tracks the directory's contents by construction.
+ * only that fourth, would be invisible to it. Reading the directory means the
+ * breadth tracks the directory's contents -- for the extensions
+ * `TS_EXTENSIONS` knows, which is what the set assertion in the resolved-set
+ * test exists to keep honest.
  */
 function expectedFilesFor(entry: string): string[] {
   const target = path.join(ROOT, entry);
   if (!fs.existsSync(target)) return [target]; // let the caller's assertion name it
-  return fs.statSync(target).isDirectory() ? typeScriptFilesUnder(target) : [target];
+  return isDirectoryEntry(entry) ? typeScriptFilesUnder(target) : [target];
 }
 
 describe('the typecheck gate', () => {
@@ -183,16 +228,16 @@ describe('the typecheck gate', () => {
     // coverage. `src` alone is a dozen files, so this floor is slack on purpose.
     expect(resolved.length).toBeGreaterThan(COVERED_ENTRY_POINTS.length);
 
-    const directoryEntries = COVERED_ENTRY_POINTS.filter(
-      entry =>
-        fs.existsSync(path.join(ROOT, entry)) && fs.statSync(path.join(ROOT, entry)).isDirectory()
-    );
-
     for (const entry of COVERED_ENTRY_POINTS) {
       // Not `path.join(ROOT, entry)`: for `scripts` that is a directory path,
-      // which is never in `fileNames`. `expectedFilesFor` expands a directory
-      // to the files under it and leaves a file entry as itself, so one loop
-      // covers both and neither is asserted against something unreachable.
+      // which is never in `fileNames`. That is left to a mutation round rather
+      // than asserted here, because against a pinned tsc an assertion that the
+      // directory path is ABSENT cannot fail -- it is true by construction, and
+      // a test that cannot go red is not a check. Pointing this loop at the
+      // bare entry fails with `Expected value: <root>/scripts`.
+      // `expectedFilesFor` expands a directory to the files under it and leaves
+      // a file entry as itself, so one loop covers both and neither is asserted
+      // against something unreachable.
       const files = expectedFilesFor(entry);
 
       // The loop below asserts nothing at all on an empty list, and an empty
@@ -206,16 +251,28 @@ describe('the typecheck gate', () => {
       }
     }
 
-    // The claim the expansion above rests on, as a check rather than a comment:
-    // tsc reports the FILES a directory entry expands to and never the
-    // directory itself. If that ever stops being true the comment is wrong, and
-    // a `toContain` on the bare entry would have been the simpler gate.
-    // Control: the three assertions this needs are directly above -- each
-    // directory's files ARE in `resolved` -- so this cannot be an absence that
-    // holds because nothing resolved.
+    // For a DIRECTORY entry, set equality against what tsc resolved under it --
+    // not just the containment above, which is a floor one level down from the
+    // one `COVERED_ENTRY_POINTS` refuses to be. Containment only proves tsc
+    // resolves at least the files `TS_EXTENSIONS` knows how to find, so a
+    // `.mts` script would be typechecked by tsc, asserted by nothing, and then
+    // silently `exclude`-able -- the same vacuity this test is named for, one
+    // level in. Equality turns any disagreement about what a directory covers
+    // (an extension this file has not heard of, a glob rule it gets wrong) into
+    // a red test. Measured: this is the assertion that fails on a `.mts` the
+    // walk cannot see, and the containment loop above is not.
+    const directoryEntries = COVERED_ENTRY_POINTS.filter(isDirectoryEntry);
+
+    // `scripts` is the only directory entry today, and an empty list would make
+    // the loop below assert nothing. If `scripts` is ever retired, this floor is
+    // a THIRD edit alongside the config and the list -- delete it, rather than
+    // reading `Received: 0` as a missing directory.
     expect(directoryEntries.length).toBeGreaterThan(0);
+
     for (const entry of directoryEntries) {
-      expect(resolved).not.toContain(path.join(ROOT, entry));
+      const dir = path.join(ROOT, entry);
+      const resolvedUnder = resolved.filter(file => file.startsWith(dir + path.sep));
+      expect(new Set(resolvedUnder)).toEqual(new Set(expectedFilesFor(entry)));
     }
   });
 
