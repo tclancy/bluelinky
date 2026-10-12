@@ -8,13 +8,20 @@
   // required `CheckRow` field forces a writer to supply it -- could not fire
   // against the one production writer. This config is what makes them fire.
   //
-  // Narrow on purpose. Four other root paths are NOT here, measured 2026-10-11
+  // Narrow on purpose. Three other root paths are NOT here, measured 2026-10-11
   // by adding each one alone:
   //   get-fuel-level.ts  8 errors   debug.ts  1 error   __tests__/  5 errors
-  //   scripts/           0 errors -- green today, deferred only to keep #19's
-  //                                  diff to the file it is about (see #27)
   // Widening this is a follow-up, not a drive-by: a config that cannot pass
   // today would be a permanently red gate, which is the same non-gate as none.
+  //
+  // `scripts` joined the covered set in #27 -- it was the fourth of those paths
+  // and the only one already at 0 errors, held out of #19 solely to keep that
+  // diff to the file it was named for. It is the first DIRECTORY entry here,
+  // and a directory is covered differently from a file: tsc expands it to
+  // `scripts/**/*`, so `fileNames` contains the three `.ts` files under it and
+  // never the directory path itself. The spec enumerates that directory from
+  // disk rather than hard-coding its contents, so a script added tomorrow is
+  // required to resolve without anyone editing a list.
   //
   // `monitor-fuel.ts` joined the covered set in #19. It was held out for the
   // three `TS2345` errors PR #21 fixed, and nothing else -- its whole import
@@ -30,5 +37,12 @@
     "noEmit": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["src", "monitor.ts", "status-json.ts", "alert-backends.ts", "monitor-fuel.ts"]
+  "include": [
+    "src",
+    "monitor.ts",
+    "status-json.ts",
+    "alert-backends.ts",
+    "monitor-fuel.ts",
+    "scripts"
+  ]
 }

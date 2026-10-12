@@ -36,13 +36,57 @@ const WORKFLOW = path.join(ROOT, '.github', 'workflows', 'ci.yaml');
  * the config fails, and adding one here without adding it there fails too.
  * A floor would have let `alert-backends.ts` be silently removed -- it was in
  * the config and not in this list from the day it was added until #19.
+ *
+ * Entries are config `include` entries, which is why `scripts` is a bare
+ * directory name and not three filenames: set equality is against `include`,
+ * and `include` says `scripts`. What the directory EXPANDS to is a separate
+ * question, answered by `expectedFilesFor()` below -- the two must not be
+ * conflated, because listing the three files here instead would fail set
+ * equality while the config is correct.
  */
 const COVERED_ENTRY_POINTS = [
   'monitor.ts',
   'status-json.ts',
   'alert-backends.ts',
   'monitor-fuel.ts',
+  'scripts',
 ];
+
+/** Extensions tsc resolves for a directory entry when `allowJs` is off. */
+const TS_EXTENSIONS = ['.ts', '.tsx'];
+
+/** Every `.ts`/`.tsx` file under `dir`, recursively, absolute. */
+function typeScriptFilesUnder(dir: string): string[] {
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .flatMap(item => {
+      const full = path.join(dir, item.name);
+      if (item.isDirectory()) return typeScriptFilesUnder(full);
+      return TS_EXTENSIONS.some(ext => item.name.endsWith(ext)) ? [full] : [];
+    })
+    .sort();
+}
+
+/**
+ * The concrete files tsc has to resolve for one `include` entry.
+ *
+ * `scripts` is the first directory entry in the config, and a directory is
+ * covered differently from a file: tsc expands the entry to `scripts/**\/*` and
+ * puts the files under it in `fileNames` -- the directory path itself never
+ * appears there. So asserting `fileNames` contains `<root>/scripts` cannot
+ * pass, and relaxing the assertion until it does is how a directory entry ends
+ * up unguarded. This expands it instead.
+ *
+ * The expansion is read from DISK, not hard-coded. A list of the three scripts
+ * that exist today would be a floor: a fourth script, or an `exclude` naming
+ * only the fourth, would be invisible to it. Reading the directory means the
+ * assertion's breadth tracks the directory's contents by construction.
+ */
+function expectedFilesFor(entry: string): string[] {
+  const target = path.join(ROOT, entry);
+  if (!fs.existsSync(target)) return [target]; // let the caller's assertion name it
+  return fs.statSync(target).isDirectory() ? typeScriptFilesUnder(target) : [target];
+}
 
 describe('the typecheck gate', () => {
   it('reachability control: the three config files AND every covered entry point exist', () => {
@@ -55,7 +99,16 @@ describe('the typecheck gate', () => {
     // `tsc -p tsconfig.typecheck.json` at rc=0 and the whole suite green. The
     // resolved-set test below is what actually catches that; this loop is here
     // so the failure names the missing file instead of a set difference.
-    const entryPoints = COVERED_ENTRY_POINTS.map(entry => path.join(ROOT, entry));
+    //
+    // Expanded, so a directory entry reads its files rather than itself:
+    // `readFileSync` on a directory throws EISDIR, and an entry whose
+    // expansion is empty is a directory tsc would resolve nothing for, which
+    // is the same silent non-coverage as a renamed file.
+    const entryPoints = COVERED_ENTRY_POINTS.flatMap(entry => {
+      const files = expectedFilesFor(entry);
+      expect(files.length).toBeGreaterThan(0);
+      return files;
+    });
     for (const file of [CONFIG, PACKAGE, WORKFLOW, ...entryPoints]) {
       expect(fs.existsSync(file)).toBe(true);
       expect(fs.readFileSync(file, 'utf8').trim().length).toBeGreaterThan(0);
@@ -130,8 +183,39 @@ describe('the typecheck gate', () => {
     // coverage. `src` alone is a dozen files, so this floor is slack on purpose.
     expect(resolved.length).toBeGreaterThan(COVERED_ENTRY_POINTS.length);
 
+    const directoryEntries = COVERED_ENTRY_POINTS.filter(
+      entry =>
+        fs.existsSync(path.join(ROOT, entry)) && fs.statSync(path.join(ROOT, entry)).isDirectory()
+    );
+
     for (const entry of COVERED_ENTRY_POINTS) {
-      expect(resolved).toContain(path.join(ROOT, entry));
+      // Not `path.join(ROOT, entry)`: for `scripts` that is a directory path,
+      // which is never in `fileNames`. `expectedFilesFor` expands a directory
+      // to the files under it and leaves a file entry as itself, so one loop
+      // covers both and neither is asserted against something unreachable.
+      const files = expectedFilesFor(entry);
+
+      // The loop below asserts nothing at all on an empty list, and an empty
+      // list is reachable: an emptied `scripts/` expands to zero files and
+      // every `toContain` vanishes with it. So the breadth is asserted, not
+      // assumed, once per entry.
+      expect(files.length).toBeGreaterThan(0);
+
+      for (const file of files) {
+        expect(resolved).toContain(file);
+      }
+    }
+
+    // The claim the expansion above rests on, as a check rather than a comment:
+    // tsc reports the FILES a directory entry expands to and never the
+    // directory itself. If that ever stops being true the comment is wrong, and
+    // a `toContain` on the bare entry would have been the simpler gate.
+    // Control: the three assertions this needs are directly above -- each
+    // directory's files ARE in `resolved` -- so this cannot be an absence that
+    // holds because nothing resolved.
+    expect(directoryEntries.length).toBeGreaterThan(0);
+    for (const entry of directoryEntries) {
+      expect(resolved).not.toContain(path.join(ROOT, entry));
     }
   });
 
