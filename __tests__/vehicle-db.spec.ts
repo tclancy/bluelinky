@@ -2,7 +2,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 import Database from 'better-sqlite3';
-import { VehicleDb, batteryPctOrNull } from '../src/vehicle-db';
+import { VehicleDb, batteryPctOrNull, transCondOrNull } from '../src/vehicle-db';
 
 function tmpDb(): { db: VehicleDb; cleanup: () => void } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bluelinky-test-'));
@@ -36,6 +36,7 @@ describe('VehicleDb', () => {
       odometer_mi: null,
       car_reported_at: null,
       battery_12v_pct: null,
+      trans_cond: null,
     });
 
     expect(id).toBeGreaterThan(0);
@@ -61,6 +62,7 @@ describe('VehicleDb', () => {
       odometer_mi: 42000,
       car_reported_at: null,
       battery_12v_pct: null,
+      trans_cond: null,
     });
 
     const last = db.getLastCheck();
@@ -81,6 +83,7 @@ describe('VehicleDb', () => {
       odometer_mi: null,
       car_reported_at: null,
       battery_12v_pct: null,
+      trans_cond: null,
     });
 
     db.insertTpms({
@@ -139,6 +142,7 @@ describe('VehicleDb', () => {
       odometer_mi: null,
       car_reported_at: null,
       battery_12v_pct: null,
+      trans_cond: null,
     });
     db.insertCheck({
       ts: '2026-04-15T11:00:00Z',
@@ -149,6 +153,7 @@ describe('VehicleDb', () => {
       odometer_mi: null,
       car_reported_at: null,
       battery_12v_pct: null,
+      trans_cond: null,
     });
 
     const last = db.getLastCheck();
@@ -172,6 +177,7 @@ describe('VehicleDb', () => {
       odometer_mi: null,
       car_reported_at: '2026-09-19T11:04:00.000Z',
       battery_12v_pct: null,
+      trans_cond: null,
     });
 
     const last = db.getLastCheck();
@@ -191,6 +197,7 @@ describe('VehicleDb', () => {
       odometer_mi: null,
       car_reported_at: null,
       battery_12v_pct: null,
+      trans_cond: null,
     });
     expect(db.getLastCheck()!.car_reported_at).toBeNull();
     cleanup();
@@ -208,6 +215,7 @@ describe('VehicleDb', () => {
       odometer_mi: null,
       car_reported_at: '2026-10-07T21:24:54.000Z',
       battery_12v_pct: 84,
+      trans_cond: null,
     });
     expect(db.getLastCheck()!.battery_12v_pct).toBe(84);
 
@@ -222,6 +230,7 @@ describe('VehicleDb', () => {
       // 0, not null: this must come back as 0. A column the insert statement
       // forgot would come back NULL here and the 84 above would still pass.
       battery_12v_pct: 0,
+      trans_cond: null,
     });
     expect(db.getLastCheck()!.battery_12v_pct).toBe(0);
 
@@ -239,6 +248,7 @@ describe('VehicleDb', () => {
       odometer_mi: null,
       car_reported_at: null,
       battery_12v_pct: null,
+      trans_cond: null,
     });
     expect(db.getLastCheck()!.battery_12v_pct).toBeNull();
     cleanup();
@@ -300,6 +310,7 @@ describe('getTpmsForCheck', () => {
       is_fillup: 0,
       odometer_mi: null,
       battery_12v_pct: null,
+      trans_cond: null,
     };
     const older = db.insertCheck({
       ...base,
@@ -358,6 +369,7 @@ describe('insertCheckWithTpms', () => {
     odometer_mi: null,
     car_reported_at: '2026-10-07T21:24:54.000Z',
     battery_12v_pct: 84,
+    trans_cond: null,
   };
   const lamps = {
     ts: '2026-10-07T21:24:54.000Z',
@@ -476,6 +488,7 @@ describe('VehicleDb migration onto a pre-existing checks table', () => {
       odometer_mi: null,
       car_reported_at: '2026-09-22T18:41:00.000Z',
       battery_12v_pct: 84,
+      trans_cond: null,
     });
     expect(db.getLastCheck()!.car_reported_at).toBe('2026-09-22T18:41:00.000Z');
     // Both columns, not whichever one `addColumnIfMissing` reached first.
@@ -571,6 +584,7 @@ describe('VehicleDb migration onto a table that already has car_reported_at', ()
       odometer_mi: null,
       car_reported_at: '2026-10-07T20:24:54.000Z',
       battery_12v_pct: 84,
+      trans_cond: null,
     });
     expect(db.getLastCheck()!.battery_12v_pct).toBe(84);
 
@@ -610,5 +624,202 @@ describe('the migration narrows what it forgives', () => {
     expect(() => new VehicleDb(dbPath)).toThrow(/Cannot add a column to a view/);
 
     fs.rmSync(dir, { recursive: true });
+  });
+});
+
+describe('transCondOrNull', () => {
+  it('maps the two real booleans to 1 and 0', () => {
+    expect(transCondOrNull(true)).toBe(1);
+    // 0, not null. This is the half a truthiness guard destroys, and if the
+    // field ever does mean "transmission OK" it is the only interesting value.
+    expect(transCondOrNull(false)).toBe(0);
+  });
+
+  it('maps an absent field to null, which is a different fact from 0', () => {
+    expect(transCondOrNull(undefined)).toBeNull();
+    expect(transCondOrNull(null)).toBeNull();
+  });
+
+  /**
+   * The field arrives through an `as VehicleStatus` cast over a vendor parser,
+   * so its runtime type is a claim. A `!!value` rule would record every one of
+   * these as a reported `true`, and `value === undefined ? null : !!value`
+   * would record the string `'false'` as `true` -- the worst case, since it is
+   * what a JSON round-trip through a text column or a query string produces.
+   */
+  it('refuses non-booleans rather than coercing them', () => {
+    expect(transCondOrNull(1)).toBeNull();
+    expect(transCondOrNull(0)).toBeNull();
+    expect(transCondOrNull('true')).toBeNull();
+    expect(transCondOrNull('false')).toBeNull();
+    expect(transCondOrNull('')).toBeNull();
+    expect(transCondOrNull({})).toBeNull();
+    expect(transCondOrNull([])).toBeNull();
+    expect(transCondOrNull(NaN)).toBeNull();
+  });
+});
+
+describe('VehicleDb trans_cond round-trip', () => {
+  it('round-trips a reported false as 0, not as null', () => {
+    const { db, cleanup } = tmpDb();
+
+    db.insertCheck({
+      ts: '2026-10-12T13:33:11.000Z',
+      vehicle_name: '2020 SANTA FE',
+      range_mi: 236,
+      temp_f: null,
+      is_fillup: 0,
+      odometer_mi: null,
+      car_reported_at: '2026-10-10T22:09:25.000Z',
+      battery_12v_pct: null,
+      trans_cond: 1,
+    });
+    expect(db.getLastCheck()!.trans_cond).toBe(1);
+
+    db.insertCheck({
+      ts: '2026-10-12T14:33:11.000Z',
+      vehicle_name: '2020 SANTA FE',
+      range_mi: 236,
+      temp_f: null,
+      is_fillup: 0,
+      odometer_mi: null,
+      car_reported_at: '2026-10-10T22:09:25.000Z',
+      battery_12v_pct: null,
+      // 0, not null, and this is the assertion that catches a column the
+      // INSERT statement forgot: a forgotten column reads back NULL, and the
+      // `toBe(1)` above would still pass because 1 is also what a defaulted
+      // column would never be -- but NULL is what it would be. Pairing a 1
+      // with a 0 is what makes the statement itself testable.
+      trans_cond: 0,
+    });
+    expect(db.getLastCheck()!.trans_cond).toBe(0);
+
+    cleanup();
+  });
+
+  it('stores null when the car never reported the field', () => {
+    const { db, cleanup } = tmpDb();
+    db.insertCheck({
+      ts: '2026-10-12T13:33:11.000Z',
+      vehicle_name: '2020 SANTA FE',
+      range_mi: 236,
+      temp_f: null,
+      is_fillup: 0,
+      odometer_mi: null,
+      car_reported_at: null,
+      battery_12v_pct: null,
+      trans_cond: null,
+    });
+    expect(db.getLastCheck()!.trans_cond).toBeNull();
+    cleanup();
+  });
+});
+
+/**
+ * Production's shape **today**, which now means nine columns, not eight.
+ *
+ * plexpi's `vehicle-monitor.db` has already been through both earlier
+ * migrations, so this is the shape the `trans_cond` migration will actually
+ * meet. The fixture exists for that realism, and for nothing cleverer.
+ *
+ * It is NOT load-bearing the way the battery fixture above is, and an earlier
+ * version of this comment claimed it was -- that `addColumnIfMissing` "returns
+ * early on its first match" so a fixture missing every column could not tell
+ * which one got added. That is wrong: `initSchema` makes three independent
+ * calls and each returns early only on *its own* column, so a legacy fixture
+ * gets all three. Proved by mutation -- deleting the `trans_cond` call also
+ * reddens the legacy-fixture test above, so that test alone would have caught
+ * it. The battery docstring is correct only because it carries the clause this
+ * one dropped: "a loop that checked one column and stopped".
+ */
+describe('VehicleDb migration onto a table that already has battery_12v_pct', () => {
+  function todayShapeDb(): { dbPath: string; cleanup: () => void } {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bluelinky-today-'));
+    const dbPath = path.join(dir, 'today.db');
+    const raw = new Database(dbPath);
+    raw.exec(`
+      CREATE TABLE checks (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts          TEXT    NOT NULL,
+        vehicle_name TEXT   NOT NULL,
+        range_mi    REAL    NOT NULL,
+        temp_f      REAL,
+        is_fillup   INTEGER NOT NULL DEFAULT 0,
+        odometer_mi REAL,
+        car_reported_at TEXT,
+        battery_12v_pct INTEGER
+      );
+    `);
+    raw
+      .prepare(
+        'INSERT INTO checks (ts, vehicle_name, range_mi, temp_f, is_fillup, odometer_mi,' +
+          " car_reported_at, battery_12v_pct) VALUES ('2026-10-10T22:09:25.000Z'," +
+          " '2020 SANTA FE', 236, 60.7, 0, NULL, '2026-10-10T22:09:25.000Z', 84)"
+      )
+      .run();
+    raw.close();
+    return { dbPath, cleanup: () => fs.rmSync(dir, { recursive: true }) };
+  }
+
+  it('control: the fixture has battery_12v_pct and lacks trans_cond', () => {
+    const { dbPath, cleanup } = todayShapeDb();
+    const raw = new Database(dbPath);
+    const columns = (raw.prepare('PRAGMA table_info(checks)').all() as { name: string }[]).map(
+      c => c.name
+    );
+    raw.close();
+    // Without this control the test below cannot be told apart from one run
+    // against a table that already had the column.
+    expect(columns).toContain('battery_12v_pct');
+    expect(columns).not.toContain('trans_cond');
+    cleanup();
+  });
+
+  it('adds trans_cond and preserves the existing row', () => {
+    const { dbPath, cleanup } = todayShapeDb();
+    const db = new VehicleDb(dbPath);
+
+    const row = db.getLastCheck()!;
+    expect(row.vehicle_name).toBe('2020 SANTA FE');
+    expect(row.range_mi).toBe(236);
+    // The pre-migration row keeps its own values -- a migration that recreated
+    // the table would lose these and still end up with the right columns.
+    expect(row.battery_12v_pct).toBe(84);
+    expect(row.car_reported_at).toBe('2026-10-10T22:09:25.000Z');
+
+    const probe = new Database(dbPath, { readonly: true });
+    const columns = (probe.prepare('PRAGMA table_info(checks)').all() as { name: string }[]).map(
+      c => c.name
+    );
+    probe.close();
+    expect(columns).toContain('trans_cond');
+
+    // And the migrated table takes a write on the new shape.
+    db.insertCheck({
+      ts: '2026-10-12T13:33:11.000Z',
+      vehicle_name: '2020 SANTA FE',
+      range_mi: 230,
+      temp_f: null,
+      is_fillup: 0,
+      odometer_mi: null,
+      car_reported_at: '2026-10-10T22:09:25.000Z',
+      battery_12v_pct: 84,
+      trans_cond: 1,
+    });
+    expect(db.getLastCheck()!.trans_cond).toBe(1);
+
+    db.close();
+    cleanup();
+  });
+
+  it('is idempotent -- a second open does not throw a duplicate-column error', () => {
+    const { dbPath, cleanup } = todayShapeDb();
+    const first = new VehicleDb(dbPath);
+    first.close();
+    expect(() => {
+      const second = new VehicleDb(dbPath);
+      second.close();
+    }).not.toThrow();
+    cleanup();
   });
 });

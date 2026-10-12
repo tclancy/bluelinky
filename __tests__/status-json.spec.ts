@@ -28,6 +28,7 @@ function row(overrides: Partial<CheckRow> = {}): CheckRow {
     odometer_mi: null,
     car_reported_at: '2026-09-19T11:04:00.000Z',
     battery_12v_pct: 84,
+    trans_cond: null,
     ...overrides,
   };
 }
@@ -277,6 +278,7 @@ describe('statusReport', () => {
       odometer_mi: null,
       car_reported_at: '2026-09-19T11:04:00.000Z',
       battery_12v_pct: null,
+      trans_cond: null,
     });
     db.close();
 
@@ -314,6 +316,7 @@ describe('statusReport', () => {
       odometer_mi: null,
       car_reported_at: '2026-09-19T10:04:00.000Z',
       battery_12v_pct: 81,
+      trans_cond: null,
     });
     db.insertTpms({
       check_id: older,
@@ -333,6 +336,7 @@ describe('statusReport', () => {
       odometer_mi: null,
       car_reported_at: '2026-09-19T11:04:00.000Z',
       battery_12v_pct: 84,
+      trans_cond: null,
     });
     db.close();
 
@@ -412,6 +416,11 @@ describe('statusReport', () => {
         odometer_mi: null,
         car_reported_at: '2026-10-07T21:24:54.000Z',
         battery_12v_pct: 84,
+        // 1, not null, on purpose: the exhaustive `toEqual` below is what keeps
+        // `trans_cond` out of the wire contract (#23), and a null fixture
+        // cannot tell a document that omits the field from one that emits
+        // it as null. With a 1 here, any leak into the document fails.
+        trans_cond: 1,
       },
       {
         ts: '2026-09-22T18:00:09.885Z',
@@ -555,6 +564,7 @@ describe('the reader and the writer resolve the same database', () => {
       odometer_mi: null,
       car_reported_at: '2026-09-22T16:36:29.000Z',
       battery_12v_pct: null,
+      trans_cond: null,
     });
     db.close();
 

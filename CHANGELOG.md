@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-10-12
+
+- Add `checks.trans_cond`, populated from the raw payload's `transCond` via the
+  parsed status's new optional `chassis.transmissionCondition`. Migrated in
+  place with the same idempotent `ALTER TABLE`; existing rows keep a null.
+  Stored as 1 / 0, with **null reserved for "the car never reported it"** —
+  `transCondOrNull` refuses non-booleans rather than coercing them, because the
+  field arrives through an `as VehicleStatus` cast and a truthy `'false'` string
+  would otherwise be recorded as a reading nobody gave. Costs no extra API
+  call: `status({ parsed: true })` throws the raw body away, so the value is
+  derived in the American parser from the response the hourly check already
+  makes (issue #23).
+- **Nothing alerts on it, deliberately.** #23 asked to flag the field "if it
+  turns on"; it is already on. A read-only probe of the live car on 2026-10-12
+  measured `transCond=true` while every fault indicator was clear, and all four
+  status mocks agree — so an alert on `true` would fire every hour. The vendor
+  documents nothing about the field, so the column exists to find out whether it
+  ever moves. The value is also logged to `cron.log` each run, since a column
+  nothing surfaces is a history nobody reads.
+- `status-json` is **unchanged**: `trans_cond` is deliberately not in the wire
+  contract, which the exhaustive `toEqual` in `__tests__/status-json.spec.ts`
+  now pins with a non-null fixture.
+
 ## 2026-10-08
 
 - Move the tracked compose file from `deployment/docker-compose.yml` to the

@@ -196,6 +196,18 @@ async function monitor(): Promise<void> {
       console.log(`Temperature: ${tempF !== null ? `${tempF}°F` : 'unavailable'}`);
       const battery12v = batteryPctOrNull(status.engine.batteryCharge12v);
       console.log(`12V Battery: ${battery12v !== null ? `${battery12v}%` : 'unavailable'}`);
+      // Logged as well as stored (#23). A column nothing surfaces is a history
+      // nobody reads: the stated point of recording this is to notice if the
+      // value ever moves, and `cron.log` is the only surface anyone actually
+      // sees hourly. It also makes a mis-wired source field visible on the
+      // first run rather than after months of a plausible-looking column.
+      console.log(
+        `transCond: ${
+          status.chassis.transmissionCondition !== undefined
+            ? status.chassis.transmissionCondition
+            : 'unavailable'
+        }`
+      );
       console.log(
         `TPMS: FL=${tpmsLamps.frontLeft} FR=${tpmsLamps.frontRight} RL=${tpmsLamps.rearLeft} RR=${tpmsLamps.rearRight} ALL=${tpmsLamps.all}\n`
       );
@@ -237,6 +249,15 @@ async function monitor(): Promise<void> {
           // days-old reading, and only that field can say so.
           lastupdate: status.lastupdate,
           batteryCharge12v: status.engine.batteryCharge12v,
+          // Recorded, deliberately not alerted on (#23). The ticket asked to
+          // flag it "if it turns on", but it is already on: measured `true` on
+          // this car while it sat idle with every fault indicator clear, and
+          // all four upstream mocks agree. An alert on `true` would fire on
+          // this poll and every hourly poll after it. The vendor documents
+          // nothing about the field, so the history this column builds is the
+          // only way to learn whether it ever moves -- and the polarity
+          // question is Tom's to rule on, on the issue.
+          transmissionCondition: status.chassis.transmissionCondition,
         }),
         {
           ts,

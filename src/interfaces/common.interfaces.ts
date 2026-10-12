@@ -86,6 +86,15 @@ export interface VehicleStatus {
       rearRight: boolean;
       all: boolean;
     };
+    /**
+     * The raw payload's `transCond`, surfaced so one poll can record it (#23).
+     *
+     * Optional, and `undefined` is a different fact from `false`: only the
+     * regions whose parser reads it set it. Kept brief deliberately -- this
+     * file is upstream-owned, so prose here is merge surface against
+     * `hacksore/bluelinky`. The reasoning lives on issue #23.
+     */
+    transmissionCondition?: boolean;
   };
   lastupdate: Date | null;
 }
