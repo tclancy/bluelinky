@@ -27,11 +27,29 @@ jobs:
         run: npx prettier --check './src/**/*.{js,jsx,ts,tsx}' './__tests__/**/*.{js,jsx,ts,tsx}' './*.ts'
   test:
     runs-on: ubuntu-latest
+    # Two legs, one either side of the major-21 threshold, because the Canadian
+    # region has two production transports and the threshold is what selects
+    # between them: `got` below 21, undici's `fetch` at or above it. A single
+    # leg grades one arm and leaves the other merely reachable.
+    #
+    # Measured on 2026-10-12 against this branch, hard-wiring
+    # `useFetchTransport` past `shouldUseFetchTransport()`:
+    #
+    #   = true   node 20 RED   node 24 green
+    #   = false  node 20 green node 24 RED
+    #
+    # The second row is why this is not cosmetic: node 20 alone -- what CI ran
+    # before this change -- is blind to the mutant that disables the arm that
+    # actually executes on plexpi.
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20, 24]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ matrix.node-version }}
       - run: npm ci
       - run: npm test
   build:
