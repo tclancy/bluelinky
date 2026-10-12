@@ -1,69 +1,66 @@
 import fs from 'fs';
 import path from 'path';
 
+import { CanadianController } from '../src/controllers/canadian.controller';
 import {
   FETCH_TRANSPORT_MIN_NODE_MAJOR,
   shouldUseFetchTransport,
 } from '../src/tools/runtime.tools';
 
 /**
- * Pins the CI `test` job to grading BOTH Canadian transports, not one.
+ * Pins the CI `test` job to running an interpreter each side of the Canadian
+ * transport threshold, and pins the one assertion that makes that worth doing.
  *
- * `shouldUseFetchTransport` is a pure function of the interpreter version, so
- * the two arms it selects between -- `got` below Node 21, undici's `fetch` at
- * or above it -- are only ever *both* executed if CI runs an interpreter on
- * each side of that threshold. Before #31 the job pinned `node-version: 20`,
- * so the `fetch` arm -- the one that actually executes on plexpi -- had never
- * been run by a CI job in this repo's history.
+ * `shouldUseFetchTransport` picks between `got` (below Node 21) and undici's
+ * `fetch` (at or above) off the running major. Two things follow, and keeping
+ * them apart is what stops this file overclaiming:
  *
- * What makes this assertable rather than decorative: the threshold is imported
- * from production rather than written here. Moving
- * `FETCH_TRANSPORT_MIN_NODE_MAJOR` moves what this file demands of CI, so the
- * matrix cannot silently stop spanning the boundary it exists to span.
+ *   - It does NOT buy arm coverage. #30's injectable `useFetchTransport` means
+ *     both arms already execute on any single interpreter, because the arm
+ *     suites set the flag explicitly.
+ *   - It DOES buy the only check that the *default* selection is correct above
+ *     the threshold. Before the matrix, CI ran node 20 alone, so a default
+ *     hard-wired to `false` -- which switches off the arm the deployment box
+ *     actually runs -- was green.
  *
- * Measured against this branch on 2026-10-12, hard-wiring the field past the
- * function:
+ * Measured 2026-10-12, hard-wiring the field past the function:
  *
  *   `useFetchTransport = true`   -> node 20 RED,   node 24 green
  *   `useFetchTransport = false`  -> node 20 green, node 24 RED
  *
- * Neither leg alone catches both. That asymmetry is the whole case for a
- * matrix, and the second row is the costly one: node 20 on its own is blind to
- * the mutant that switches off the shipping arm.
+ * The threshold is imported from production rather than restated here, so
+ * moving `FETCH_TRANSPORT_MIN_NODE_MAJOR` moves what this file demands of CI.
+ *
+ * Deliberate boundary: this file grades the `test` job, not the workflow's
+ * trigger. Rewriting `on:` to `workflow_dispatch` only would leave every
+ * assertion below green -- but it also stops `lint` and `build`, so it is
+ * self-announcing in a way the per-leg neutralisations below are not.
  */
 
 const ROOT = path.join(__dirname, '..');
 const WORKFLOW = path.join(ROOT, '.github', 'workflows', 'ci.yaml');
 
+/** The workflow source, line endings normalised so a CRLF checkout still parses. */
+function workflowSource(): string {
+  return fs.readFileSync(WORKFLOW, 'utf8').replace(/\r\n/g, '\n');
+}
+
 /** The `test:` job block, from its key to the next same-indent job key. */
 function testJobBlock(): string {
-  const workflow = fs.readFileSync(WORKFLOW, 'utf8');
-  const match = workflow.match(/^ {2}test:\n(?: {4}.*\n| *\n)*/m);
+  const match = workflowSource().match(/^ {2}test:\n(?: {4}.*\n| *\n)*/m);
   if (!match) {
     throw new Error(`no two-space-indented \`test:\` job found in ${WORKFLOW}`);
   }
   return match[0];
 }
 
-/** The majors in the `test` job's `node-version` matrix. */
-function matrixMajors(): number[] {
-  const match = testJobBlock().match(/^ +node-version: \[([^\]]*)\]$/m);
-  if (!match) {
-    throw new Error('the `test` job has no inline `node-version: [...]` matrix list');
-  }
-  return match[1]
-    .split(',')
-    .map(entry => Number(entry.trim()))
-    .filter(major => !Number.isNaN(major));
-}
-
 /**
  * The block introduced by `key:` at `indent`, up to the next key at or below it.
  *
- * Needed because the keys that neutralise this gate live at different depths --
- * `continue-on-error` on the job, `exclude` under `matrix` -- and a flat scan of
- * the job block at a fixed indent also catches `with:`/`node-version:` from
- * inside `steps`.
+ * Needed because the keys that neutralise this gate live at three different
+ * depths -- `continue-on-error` on the job, `exclude` under `matrix`, `if` on a
+ * single step -- and a flat scan of the job block at one fixed indent cannot
+ * tell them apart from `with:` inside `steps`.
  */
 function subBlock(block: string, indent: number, key: string): string {
   const pattern = new RegExp(`^ {${indent}}${key}:\\n(?:(?: {${indent + 1},}.*)?\\n)*`, 'm');
@@ -74,7 +71,7 @@ function subBlock(block: string, indent: number, key: string): string {
   return match[0];
 }
 
-/** The mapping keys declared directly at `indent`, comments and list items excluded. */
+/** The mapping keys declared at exactly `indent`, comments and deeper keys excluded. */
 function keysAt(block: string, indent: number): Set<string> {
   const keys = block
     .split('\n')
@@ -84,14 +81,39 @@ function keysAt(block: string, indent: number): Set<string> {
   return new Set(keys);
 }
 
+const strategyBlock = () => subBlock(testJobBlock(), 4, 'strategy');
+const matrixBlock = () => subBlock(strategyBlock(), 6, 'matrix');
+const stepsBlock = () => subBlock(testJobBlock(), 4, 'steps');
+
+/**
+ * The majors in the `test` job's matrix.
+ *
+ * Read out of the `matrix:` sub-block rather than the job block, so it cannot
+ * pick up a `node-version:` that happens to sit elsewhere in the job -- YAML
+ * does not fix the order of `strategy` and `steps`.
+ */
+function matrixMajors(): number[] {
+  const match = matrixBlock().match(/^ +node-version: \[([^\]]*)\]$/m);
+  if (!match) {
+    throw new Error('the `test` job has no inline `node-version: [...]` matrix list');
+  }
+  return match[1]
+    .split(',')
+    .map(entry => Number(entry.trim()))
+    .filter(major => !Number.isNaN(major));
+}
+
 describe('the CI node-version matrix', () => {
   it('reachability control: the workflow exists, is non-empty, and yields a parseable matrix', () => {
     // Every assertion below reads one of these. Without this, a renamed
     // workflow or a reshaped `test:` block would make the helpers throw or
     // return `[]`, and an empty list satisfies `every()` vacuously -- the
     // shape in which an absence assertion passes while measuring nothing.
+    // It is also what catches quoted (`['20', '24']`), full-version
+    // (`[20.19.5]`) and non-numeric (`[20, 'latest']`) lists, all of which
+    // parse to fewer majors than they appear to declare.
     expect(fs.existsSync(WORKFLOW)).toBe(true);
-    expect(fs.readFileSync(WORKFLOW, 'utf8').trim().length).toBeGreaterThan(0);
+    expect(workflowSource().trim().length).toBeGreaterThan(0);
     expect(testJobBlock()).toMatch(/runs-on:/);
     expect(matrixMajors().length).toBeGreaterThanOrEqual(2);
   });
@@ -123,6 +145,31 @@ describe('the CI node-version matrix', () => {
     expect(selections).toEqual(new Set([false, true]));
   });
 
+  it('the leg this test is running on grades the default, not merely the function', () => {
+    // The assertion that makes the matrix falsifiable at all. Without a
+    // version-sensitive expectation SOMEWHERE in the suite, the legs are a
+    // duplicate run of byte-identical assertions and every structural check
+    // above still passes. `canadian-transport.spec.ts` carries this too; the
+    // duplication is deliberate, because it must not be able to disappear
+    // from under the file whose docblock explains why the legs exist.
+    //
+    // Derived from `process.version` -- a different API than the production
+    // default reads -- so a hardcoded default cannot satisfy it.
+    const runningMajor = Number(process.version.replace(/^v/, '').split('.')[0]);
+    const controller = new CanadianController({
+      username: 'testuser@gmail.com',
+      password: 'test',
+      region: 'CA',
+      autoLogin: false,
+      brand: 'hyundai',
+      pin: '1234',
+      vin: '4444444444444',
+      vehicleId: undefined,
+    } as never);
+
+    expect(controller.useFetchTransport).toBe(runningMajor >= FETCH_TRANSPORT_MIN_NODE_MAJOR);
+  });
+
   it('the job consumes the matrix rather than pinning a literal version', () => {
     // A matrix that exists and is never read would double the runtime and
     // grade one arm twice. `setup-node` has to interpolate it.
@@ -132,45 +179,57 @@ describe('the CI node-version matrix', () => {
   });
 
   it('does not fail fast, so a red leg cannot cancel the other', () => {
-    // Without this, the first leg to go red cancels its sibling and the run
+    // Without this, the first leg to go red cancels its siblings and the run
     // reports one failure of unknown scope -- precisely the per-arm
     // information the matrix was added to produce.
-    expect(testJobBlock()).toMatch(/^ +fail-fast: false$/m);
+    expect(strategyBlock()).toMatch(/^ +fail-fast: false$/m);
   });
 
-  // The three below are ALLOW-lists, not bans on the specific keys that are
-  // known to neutralise this gate. A ban passes every synonym: the first draft
-  // of this file asserted the version list and the interpolation, and a
-  // mutation round then walked straight past it twice --
+  // The four below are ALLOW-lists over the permitted key SET at each depth,
+  // not bans on the specific keys known to neutralise this gate. A ban passes
+  // every synonym, and a mutation round walked past the first draft of this
+  // file three times on keys it had not thought of:
   //
-  //   `continue-on-error: true` on the job   -> both legs run, neither can fail it
-  //   `exclude: [{node-version: 20}]`        -> only the 24 leg runs, and
-  //                                             `node-version: [20, 24]` still
-  //                                             reads intact, so every
-  //                                             threshold assertion above passes
+  //   continue-on-error: true  on the job   -> all legs run, none can fail it
+  //   exclude: [{node-version: 20}]         -> only the upper leg runs, while
+  //                                            the list still reads intact
+  //   if: matrix.node-version == 20  on a step -> ditto, one level deeper
   //
-  // The second is the one worth the apparatus: it retires the `got` arm from CI
-  // -- the exact regression this file exists to catch -- without touching any
-  // text the assertions above look at. Asserting the permitted key SET is what
-  // closes the class rather than those two instances.
+  // All three retire a leg -- the exact regression this file exists to catch --
+  // without touching any text the assertions above read.
+  //
+  // Benign keys are banned too, by design: `name`, `env` and `timeout-minutes`
+  // are not neutralisation vectors, and a timeout turns a leg RED rather than
+  // quiet. Closure is what makes an allow-list work, so adding any key here is
+  // meant to be a deliberate edit to this test, and it fails loudly.
 
-  it('the test job declares no keys beyond runs-on/strategy/steps', () => {
-    // `continue-on-error`, `if`, and `timeout-minutes` all live here and all
-    // neutralise or skip the legs while leaving the matrix text intact.
+  it('the test job declares no keys beyond runs-on/strategy/steps (adding one is a deliberate edit here)', () => {
     expect(keysAt(testJobBlock(), 4)).toEqual(new Set(['runs-on', 'strategy', 'steps']));
   });
 
-  it('the strategy declares no keys beyond fail-fast/matrix', () => {
-    expect(keysAt(subBlock(testJobBlock(), 4, 'strategy'), 6)).toEqual(
-      new Set(['fail-fast', 'matrix'])
-    );
+  it('the strategy declares no keys beyond fail-fast/matrix (adding one is a deliberate edit here)', () => {
+    expect(keysAt(strategyBlock(), 6)).toEqual(new Set(['fail-fast', 'matrix']));
   });
 
   it('the matrix declares node-version and nothing that could filter it', () => {
     // `exclude` and `include` both reshape the realised leg set without
     // changing the list, so an allow-list of one key is the only assertion
     // that sees them.
-    const strategy = subBlock(testJobBlock(), 4, 'strategy');
-    expect(keysAt(subBlock(strategy, 6, 'matrix'), 8)).toEqual(new Set(['node-version']));
+    expect(keysAt(matrixBlock(), 8)).toEqual(new Set(['node-version']));
+  });
+
+  it('every leg still installs and runs the suite, ungated (adding a step key is a deliberate edit here)', () => {
+    // The depth the first two drafts left open. A step-level `if` or
+    // `continue-on-error` retires a leg while the job-level and matrix-level
+    // allow-lists above read perfectly intact.
+    //
+    // `- ` is normalised to two spaces so each item's first key lands at the
+    // same indent as `with:`, which is where a step-level `if` would also sit.
+    const steps = stepsBlock();
+    expect(steps).toMatch(/^ +- run: npm ci$/m);
+    expect(steps).toMatch(/^ +- run: npm test$/m);
+    expect(keysAt(steps.replace(/^ {6}- /gm, '        '), 8)).toEqual(
+      new Set(['uses', 'with', 'run'])
+    );
   });
 });
