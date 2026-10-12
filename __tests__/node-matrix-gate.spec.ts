@@ -57,6 +57,33 @@ function matrixMajors(): number[] {
     .filter(major => !Number.isNaN(major));
 }
 
+/**
+ * The block introduced by `key:` at `indent`, up to the next key at or below it.
+ *
+ * Needed because the keys that neutralise this gate live at different depths --
+ * `continue-on-error` on the job, `exclude` under `matrix` -- and a flat scan of
+ * the job block at a fixed indent also catches `with:`/`node-version:` from
+ * inside `steps`.
+ */
+function subBlock(block: string, indent: number, key: string): string {
+  const pattern = new RegExp(`^ {${indent}}${key}:\\n(?:(?: {${indent + 1},}.*)?\\n)*`, 'm');
+  const match = block.match(pattern);
+  if (!match) {
+    throw new Error(`no \`${key}:\` at indent ${indent} in block`);
+  }
+  return match[0];
+}
+
+/** The mapping keys declared directly at `indent`, comments and list items excluded. */
+function keysAt(block: string, indent: number): Set<string> {
+  const keys = block
+    .split('\n')
+    .map(line => line.match(new RegExp(`^ {${indent}}([A-Za-z][A-Za-z0-9-]*):`)))
+    .filter((match): match is RegExpMatchArray => match !== null)
+    .map(match => match[1]);
+  return new Set(keys);
+}
+
 describe('the CI node-version matrix', () => {
   it('reachability control: the workflow exists, is non-empty, and yields a parseable matrix', () => {
     // Every assertion below reads one of these. Without this, a renamed
@@ -109,5 +136,41 @@ describe('the CI node-version matrix', () => {
     // reports one failure of unknown scope -- precisely the per-arm
     // information the matrix was added to produce.
     expect(testJobBlock()).toMatch(/^ +fail-fast: false$/m);
+  });
+
+  // The three below are ALLOW-lists, not bans on the specific keys that are
+  // known to neutralise this gate. A ban passes every synonym: the first draft
+  // of this file asserted the version list and the interpolation, and a
+  // mutation round then walked straight past it twice --
+  //
+  //   `continue-on-error: true` on the job   -> both legs run, neither can fail it
+  //   `exclude: [{node-version: 20}]`        -> only the 24 leg runs, and
+  //                                             `node-version: [20, 24]` still
+  //                                             reads intact, so every
+  //                                             threshold assertion above passes
+  //
+  // The second is the one worth the apparatus: it retires the `got` arm from CI
+  // -- the exact regression this file exists to catch -- without touching any
+  // text the assertions above look at. Asserting the permitted key SET is what
+  // closes the class rather than those two instances.
+
+  it('the test job declares no keys beyond runs-on/strategy/steps', () => {
+    // `continue-on-error`, `if`, and `timeout-minutes` all live here and all
+    // neutralise or skip the legs while leaving the matrix text intact.
+    expect(keysAt(testJobBlock(), 4)).toEqual(new Set(['runs-on', 'strategy', 'steps']));
+  });
+
+  it('the strategy declares no keys beyond fail-fast/matrix', () => {
+    expect(keysAt(subBlock(testJobBlock(), 4, 'strategy'), 6)).toEqual(
+      new Set(['fail-fast', 'matrix'])
+    );
+  });
+
+  it('the matrix declares node-version and nothing that could filter it', () => {
+    // `exclude` and `include` both reshape the realised leg set without
+    // changing the list, so an allow-list of one key is the only assertion
+    // that sees them.
+    const strategy = subBlock(testJobBlock(), 4, 'strategy');
+    expect(keysAt(subBlock(strategy, 6, 'matrix'), 8)).toEqual(new Set(['node-version']));
   });
 });
