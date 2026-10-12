@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-10-12
+
+- **The Canadian arm no longer disables TLS certificate verification
+  process-wide.** Both Canadian request paths set
+  `process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'` before their `fetch` call,
+  and nothing restored it — so once either ran, every later HTTPS call anything
+  in the process made skipped certificate verification for the life of that
+  process, including the US Bluelink calls `monitor.ts` makes hourly and the
+  outdoor-temperature `fetch` in `monitor-helpers.ts`, which carries no
+  dispatcher of its own. The per-request undici `Agent` four lines below each
+  assignment already did the same relaxation scoped to the one request, so this
+  is a deletion rather than a rewrite. Latent, not live: `BLUELINK_REGION`
+  defaults to `US` and nothing selects `CA`, so the lines never executed in the
+  deployment — they did execute on any node >= 21 running the test suite
+  (issue #37).
+
 ## 2026-10-08
 
 - Move the tracked compose file from `deployment/docker-compose.yml` to the
