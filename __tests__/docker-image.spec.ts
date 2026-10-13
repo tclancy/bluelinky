@@ -51,17 +51,27 @@ const BUILD_TOOLCHAIN = ['python3', 'make', 'g++', 'gcc'];
  * `find . -type f` from `/app` in the image this branch builds, excluding
  * `node_modules/` and `state/` (the two trees the Dockerfile creates rather
  * than copies). **Re-measured 2026-10-13** on `docker build --platform
- * linux/arm64` / docker 29.4 against the .dockerignore in this commit -- 50
- * files. First measured 2026-10-11 at 49.
+ * linux/arm64`, docker 29.8.2 / buildx 0.37.2 (read off `docker version`, not
+ * copied -- see below), against the .dockerignore in this commit: 50 files.
+ * First measured 2026-10-11 at 49.
  *
  * WHY IT MOVED, because the next reader will meet this again (issue #40). The
  * one added entry is `src/tools/runtime.tools.ts`, which PR #30 created. This
  * pin is per-FILE and `.dockerignore` re-admits `src/` WHOLESALE via `!src`, so
  * every new file under `src/` ships and every new file under `src/` makes this
- * pin stale. PR #33 measured 49 files at 11:18Z and PR #30 added the 50th at
- * 11:24Z; each was green on its own branch and `main` was red from the second
- * merge onward, in either order. No `merge-tree` conflict sweep can see that
- * coming, because the two changes never touch the same line.
+ * pin stale. PR #33 merged its 49-file pin at 11:18Z and PR #30 added the 50th
+ * file at 11:24Z (both merge times; the 49 was measured 2026-10-11, as above).
+ * Each was green on its own branch and `main` was red from the second merge
+ * onward, in either order. No `merge-tree` conflict sweep can see that coming,
+ * because the two changes never touch the same line.
+ *
+ * The engine version above is read off `docker version` deliberately. The first
+ * draft of this docblock said "docker 29.4", third-hand from the Dockerfile's
+ * own comment via issue #40's body; this box is 29.8.2 and has been for a while.
+ * plexpi really is 29.4.3 / buildx 0.33.0, measured the same day -- so the
+ * Dockerfile's claim was true when written and drifted on the Mac side only.
+ * A copied figure in the one docblock whose whole job is to be an observed
+ * record is the same failure this constant exists to prevent, one level up.
  *
  * REGENERATE IT, NEVER EDIT IT. The whole value of this constant is that it
  * comes from outside the predictor; appending whatever `predicted` asked for
@@ -626,30 +636,35 @@ describe('runtime image content (issue #25)', () => {
     // with single-segment paths exclusively and grades neither.
     const predicted = files.filter(file => !isExcluded(file, patterns)).sort();
 
-    // Split the delta by DIRECTION before asserting equality, because the two
-    // directions have opposite remedies and the raw `toEqual` diff does not say
-    // which one you are looking at (issue #40 was exactly this).
-    //
-    //   `absentFromPin` only  -> the IMAGE grew. The pin is stale. Regenerate it
-    //                            with the command in MEASURED_IMAGE_FILES's
-    //                            docblock. Do NOT paste `predicted` in: that
-    //                            makes the control a copy of what it grades.
-    //   `absentFromImage`     -> the predictor or the .dockerignore is wrong, and
-    //                            a file the runtime reads may have stopped
-    //                            shipping. Fix the code, not the pin.
-    //
-    // Implied by the equality below, so it can never fail on its own -- it is
-    // here to name the direction, not to add coverage.
-    const absentFromPin = predicted.filter(file => !MEASURED_IMAGE_FILES.includes(file));
-    const absentFromImage = MEASURED_IMAGE_FILES.filter(file => !predicted.includes(file));
-    expect({ absentFromPin, absentFromImage }).toEqual({
-      absentFromPin: [],
-      absentFromImage: [],
-    });
-
     // Exact correspondence, not membership: a too-permissive allow-list shows
     // up here as an extra entry, a too-strict one as a missing entry. A
     // `toContain` loop over the measured list would catch only the second.
+    //
+    // WHEN THIS GOES RED, READ THE SIGN ON THE DIFF -- and note that neither
+    // sign implies a code defect on its own (issue #40):
+    //
+    //   `+` (in the image, not in the pin)  -- something new ships. If it is a
+    //       file somebody just added under `src/`, the pin is merely stale:
+    //       REGENERATE it with the command in MEASURED_IMAGE_FILES's docblock.
+    //       If it is something else, the allow-list admitted a file nobody
+    //       intended -- which is the defect this file was written for.
+    //   `-` (in the pin, not in the image)  -- something stopped shipping. A
+    //       DELETED or RENAMED `src/` file does this with nothing wrong in the
+    //       code, so again: regenerate. Otherwise the predictor or the
+    //       .dockerignore is wrong, and a file the runtime reads may be absent
+    //       from the image -- fix the code, not the pin.
+    //
+    // A rename shows BOTH signs. There is no direction here whose remedy is
+    // unambiguous, which is why this is a comment and not an assertion: an
+    // earlier draft of this change computed the two sets and asserted both
+    // empty, on the stated grounds that the directions had opposite remedies.
+    // They do not, and the assertion was implied by the equality below, so it
+    // could never fail where this passes -- 22 lines that added no coverage and
+    // justified themselves with something untrue.
+    //
+    // Whatever the sign: NEVER paste `predicted` into the pin. That makes the
+    // control a copy of the thing it grades, and this assertion is the only
+    // thing in the file answerable to Docker rather than to our own evaluator.
     expect(predicted).toEqual([...MEASURED_IMAGE_FILES].sort());
 
     // Reachability: the control is only a control if it is non-trivial and the

@@ -52,7 +52,12 @@ COPY package.json package-lock.json ./
 #
 # The cache mount keeps npm's tarball cache across builds, so a package.json
 # edit re-runs the resolve against a warm cache rather than re-downloading the
-# tree. Needs BuildKit; plexpi and this Mac are both docker 29.4 / buildx 0.33.
+# tree. Needs BuildKit, which both boxes have -- but they are no longer the
+# same version, and this line used to say they were. Re-measured 2026-10-13:
+# plexpi is docker 29.4.3 / buildx 0.33.0, this Mac is 29.8.2 / 0.37.2. The
+# stale "both 29.4" reading got copied into a test docblock as an observed
+# provenance figure before review caught it (issue #40), so: read it off
+# `docker version`, do not quote this comment.
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --omit=dev
 
@@ -71,9 +76,10 @@ WORKDIR /app
 # No `# syntax=docker/dockerfile:1` directive above, deliberately. It would
 # make every cold build fetch a frontend image from Docker Hub, on a box whose
 # whole point is that an unattended `docker compose up -d --build` works. The
-# only thing here that needs BuildKit is the cache mount, and docker 29.4's
-# BUILT-IN frontend honours it: measured `--no-cache` both ways, same 266 MB
-# image, byte-identical file set, `RUN --mount=type=cache` executed.
+# only thing here that needs BuildKit is the cache mount, and the built-in
+# frontend honours it on both versions above: measured `--no-cache` both ways
+# on 29.4, same 266 MB image, byte-identical file set, `RUN --mount=type=cache`
+# executed.
 
 # The dev-free tree, including better-sqlite3's resolved native binding.
 COPY --from=deps /app/node_modules ./node_modules
