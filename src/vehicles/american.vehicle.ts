@@ -277,6 +277,13 @@ export default class AmericanVehicle extends Vehicle {
           rearRight: !!vehicleStatus?.tirePressureLamp?.tirePressureWarningLampRearRight,
           all: !!vehicleStatus?.tirePressureLamp?.tirePressureWarningLampAll,
         },
+        // NOT `!!` like its siblings above, deliberately. Those lamps are
+        // numbers whose absence is indistinguishable from 0 anyway; this one
+        // must keep three states apart, because `undefined` means "this
+        // payload did not carry the field" and `false` is a reading. Coercing
+        // would record a fault-shaped value for a car that never reported one.
+        transmissionCondition:
+          typeof vehicleStatus?.transCond === 'boolean' ? vehicleStatus.transCond : undefined,
       },
       climate: {
         active: vehicleStatus?.airCtrlOn,

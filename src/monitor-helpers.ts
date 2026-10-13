@@ -4,7 +4,7 @@
  * the credential validation side effects in monitor.ts.
  */
 
-import { batteryPctOrNull, type CheckRow as CheckRowShape } from './vehicle-db';
+import { batteryPctOrNull, transCondOrNull, type CheckRow as CheckRowShape } from './vehicle-db';
 
 /** The insertable shape of a `checks` row (no `id` until SQLite assigns one). */
 type CheckRow = Omit<CheckRowShape, 'id'>;
@@ -122,6 +122,7 @@ export function checkRowFrom(run: {
   odometerMi: number | null;
   lastupdate: unknown;
   batteryCharge12v: unknown;
+  transmissionCondition: unknown;
 }): CheckRow {
   return {
     ts: run.ts,
@@ -132,5 +133,6 @@ export function checkRowFrom(run: {
     odometer_mi: run.odometerMi,
     car_reported_at: carReportedAt(run.lastupdate),
     battery_12v_pct: batteryPctOrNull(run.batteryCharge12v),
+    trans_cond: transCondOrNull(run.transmissionCondition),
   };
 }
