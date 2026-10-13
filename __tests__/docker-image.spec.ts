@@ -50,8 +50,27 @@ const BUILD_TOOLCHAIN = ['python3', 'make', 'g++', 'gcc'];
 /**
  * `find . -type f` from `/app` in the image this branch builds, excluding
  * `node_modules/` and `state/` (the two trees the Dockerfile creates rather
- * than copies). Measured 2026-10-11 on `docker build --platform linux/arm64`
- * against the .dockerignore in this commit -- 49 files.
+ * than copies). **Re-measured 2026-10-13** on `docker build --platform
+ * linux/arm64` / docker 29.4 against the .dockerignore in this commit -- 50
+ * files. First measured 2026-10-11 at 49.
+ *
+ * WHY IT MOVED, because the next reader will meet this again (issue #40). The
+ * one added entry is `src/tools/runtime.tools.ts`, which PR #30 created. This
+ * pin is per-FILE and `.dockerignore` re-admits `src/` WHOLESALE via `!src`, so
+ * every new file under `src/` ships and every new file under `src/` makes this
+ * pin stale. PR #33 measured 49 files at 11:18Z and PR #30 added the 50th at
+ * 11:24Z; each was green on its own branch and `main` was red from the second
+ * merge onward, in either order. No `merge-tree` conflict sweep can see that
+ * coming, because the two changes never touch the same line.
+ *
+ * REGENERATE IT, NEVER EDIT IT. The whole value of this constant is that it
+ * comes from outside the predictor; appending whatever `predicted` asked for
+ * turns the control into a copy of the thing it grades. The command is:
+ *
+ *     docker build --platform linux/arm64 -t bluelinky-measure .
+ *     docker run --rm --entrypoint sh bluelinky-measure \
+ *       -c 'cd /app && find . -type f | sed "s|^\./||" \
+ *           | grep -v "^node_modules/" | grep -v "^state/" | sort'
  *
  * This is the only thing here that ties the .dockerignore evaluator below to
  * Docker's real behaviour: the evaluator is our reimplementation of
@@ -110,6 +129,7 @@ const MEASURED_IMAGE_FILES = [
   'src/monitor-helpers.ts',
   'src/status-json.ts',
   'src/tools/common.tools.ts',
+  'src/tools/runtime.tools.ts',
   'src/util.ts',
   'src/vehicle-db.ts',
   'src/vehicles/american.vehicle.ts',
@@ -605,6 +625,27 @@ describe('runtime image content (issue #25)', () => {
     // only do anything at depth, so a top-level comparison calls `isExcluded`
     // with single-segment paths exclusively and grades neither.
     const predicted = files.filter(file => !isExcluded(file, patterns)).sort();
+
+    // Split the delta by DIRECTION before asserting equality, because the two
+    // directions have opposite remedies and the raw `toEqual` diff does not say
+    // which one you are looking at (issue #40 was exactly this).
+    //
+    //   `absentFromPin` only  -> the IMAGE grew. The pin is stale. Regenerate it
+    //                            with the command in MEASURED_IMAGE_FILES's
+    //                            docblock. Do NOT paste `predicted` in: that
+    //                            makes the control a copy of what it grades.
+    //   `absentFromImage`     -> the predictor or the .dockerignore is wrong, and
+    //                            a file the runtime reads may have stopped
+    //                            shipping. Fix the code, not the pin.
+    //
+    // Implied by the equality below, so it can never fail on its own -- it is
+    // here to name the direction, not to add coverage.
+    const absentFromPin = predicted.filter(file => !MEASURED_IMAGE_FILES.includes(file));
+    const absentFromImage = MEASURED_IMAGE_FILES.filter(file => !predicted.includes(file));
+    expect({ absentFromPin, absentFromImage }).toEqual({
+      absentFromPin: [],
+      absentFromImage: [],
+    });
 
     // Exact correspondence, not membership: a too-permissive allow-list shows
     // up here as an extra entry, a too-strict one as a missing entry. A
