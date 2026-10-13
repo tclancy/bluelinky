@@ -373,14 +373,13 @@ export default class CanadianVehicle extends Vehicle {
     // add logic for token refresh to ensure we don't use a stale token
     await this.controller.refreshAccessToken();
 
-    const [major, ,] = process.versions.node.split('.').map(Number);
-    if (major >= 21) {
+    if (this.controller.useFetchTransport) {
       body = {
         pin: this.userConfig.pin,
         ...body,
       };
       process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-      logger.debug('Node version >= 21, using fetch instead of got');
+      logger.debug('Using fetch instead of got');
       const options = {
         method: 'POST',
         body: JSON.stringify(body),

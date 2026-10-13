@@ -133,6 +133,14 @@ describe('AmericanVehicle', () => {
 describe('CanadianVehicle', () => {
   const vehicle: CanadianVehicle = getVehicle('CA');
 
+  // Every mock in this suite is a `got` mock, so pin the transport to the `got`
+  // arm rather than letting the local interpreter pick it. Before #26 this was
+  // implicit and the suite passed only on Node < 21; on Node >= 21 the Canadian
+  // request paths used undici's `fetch`, these mocks intercepted nothing and the
+  // tests made real network calls. The `fetch` arm has its own coverage in
+  // `canadian-transport.spec.ts`.
+  vehicle.controller.useFetchTransport = false;
+
   it('define new vehicle', () => {
     expect(vehicle.nickname()).toEqual('Jest is best');
   });
