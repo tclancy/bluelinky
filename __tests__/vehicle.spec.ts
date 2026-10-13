@@ -7,9 +7,6 @@ import { AmericanController } from '../src/controllers/american.controller';
 import EuropeanVehicle from '../src/vehicles/european.vehicle';
 import { EuropeanController } from '../src/controllers/european.controller';
 
-import CanadianVehicle from '../src/vehicles/canadian.vehicle';
-import { CanadianController } from '../src/controllers/canadian.controller';
-
 import AMERICAN_STATUS_MOCK from './mock/americanStatus.json';
 import EUROPE_STATUS_MOCK from './mock/europeStatus.json';
 
@@ -25,10 +22,6 @@ const referenceMap = {
   EU: {
     controller: EuropeanController,
     vehicle: EuropeanVehicle,
-  },
-  CA: {
-    controller: CanadianController,
-    vehicle: CanadianVehicle,
   },
 };
 
@@ -183,171 +176,6 @@ describe('AmericanVehicle', () => {
     // The `!!` coercion its siblings use would make this `false` -- a reading
     // the car never gave. This is the assertion that forbids that edit.
     expect(response.chassis.transmissionCondition).toBeUndefined();
-  });
-});
-
-describe('CanadianVehicle', () => {
-  const vehicle: CanadianVehicle = getVehicle('CA');
-
-  // Every mock in this suite is a `got` mock, so pin the transport to the `got`
-  // arm rather than letting the local interpreter pick it. Before #26 this was
-  // implicit and the suite passed only on Node < 21; on Node >= 21 the Canadian
-  // request paths used undici's `fetch`, these mocks intercepted nothing and the
-  // tests made real network calls. The `fetch` arm has its own coverage in
-  // `canadian-transport.spec.ts`.
-  vehicle.controller.useFetchTransport = false;
-
-  it('define new vehicle', () => {
-    expect(vehicle.nickname()).toEqual('Jest is best');
-  });
-
-  it('refresh expired access token', async () => {
-    // create session with expired access token
-    vehicle.controller.session = {
-      accessToken: 'JEST_TOKEN',
-      refreshToken: 'JEST_TOKEN',
-      tokenExpiresAt: Date.now() / 1000,
-      controlTokenExpiresAt: 0,
-    };
-
-    // mock token request
-    gotMock.mockReturnValueOnce({
-      body: JSON.stringify({
-        access_token: 'JEST_TOKEN',
-        refresh_token: 'JEST_TOKEN',
-        expires_in: 10,
-      }),
-      statusCode: 200,
-    });
-
-    const result = await vehicle.controller.refreshAccessToken();
-    expect(result).toEqual('Token refreshed');
-    // should update access token
-    expect(vehicle.controller.session.accessToken).toEqual('JEST_TOKEN');
-    expect(vehicle.controller.session.tokenExpiresAt).toBeGreaterThan(
-      Math.floor(Date.now() / 1000)
-    );
-    expect(vehicle.controller.session.tokenExpiresAt).toBeLessThan(
-      Math.floor(Date.now() / 1000 + 20)
-    );
-  });
-
-  it('call lock commmand', async () => {
-    // default session with a valid token
-    vehicle.controller.session = {
-      accessToken: 'JEST_TOKEN',
-      refreshToken: 'JEST_TOKEN',
-      tokenExpiresAt: Date.now() / 1000 + 300,
-    };
-
-    gotMock.mockReturnValueOnce({
-      body: {
-        result: {
-          pAuth: 'test',
-        },
-        responseHeader: {
-          responseCode: 0,
-        },
-      },
-      statusCode: 200,
-      json: true,
-    });
-
-    gotMock.mockReturnValueOnce({
-      body: {
-        responseHeader: {
-          responseCode: 0,
-        },
-      },
-      statusCode: 200,
-      json: true,
-    });
-
-    const response = await vehicle.lock();
-    expect(response).toEqual('Lock successful');
-  });
-
-  it('call start command succesfully', async () => {
-    // default session with a valid token
-    vehicle.controller.session = {
-      accessToken: 'JEST_TOKEN',
-      refreshToken: 'JEST_TOKEN',
-      tokenExpiresAt: Date.now() / 1000 + 300,
-    };
-
-    gotMock.mockReturnValueOnce({
-      body: {
-        result: {
-          pAuth: 'test',
-        },
-        responseHeader: {
-          responseCode: 0,
-        },
-      },
-      statusCode: 200,
-      json: true,
-    });
-
-    gotMock.mockReturnValueOnce({
-      body: {
-        responseHeader: {
-          responseCode: 0,
-        },
-      },
-      statusCode: 200,
-      json: true,
-    });
-
-    const response = await vehicle.start({
-      airCtrl: false,
-      igniOnDuration: 10,
-      airTempvalue: 70,
-      defrost: false,
-      heating1: false,
-    });
-    expect(response).toEqual('Vehicle started!');
-  });
-
-  it('call start command with error', async () => {
-    // default session with a valid token
-    vehicle.controller.session = {
-      accessToken: 'JEST_TOKEN',
-      refreshToken: 'JEST_TOKEN',
-      tokenExpiresAt: Date.now() / 1000 + 300,
-    };
-
-    gotMock.mockReturnValueOnce({
-      body: {
-        result: {
-          pAuth: 'test',
-        },
-        responseHeader: {
-          responseCode: 0,
-        },
-      },
-      statusCode: 200,
-      json: true,
-    });
-
-    gotMock.mockReturnValueOnce({
-      body: {
-        responseHeader: {
-          responseCode: 1,
-          responseDesc: 'failed',
-        },
-      },
-      statusCode: 200,
-      json: true,
-    });
-
-    const response = await vehicle.start({
-      airCtrl: false,
-      igniOnDuration: 10,
-      airTempvalue: 70,
-      defrost: false,
-      heating1: false,
-    });
-    expect(response).toEqual('Failed to start vehicle');
   });
 });
 

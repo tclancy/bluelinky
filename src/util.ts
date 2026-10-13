@@ -16,11 +16,6 @@ const REGION_STEP_RANGES = {
     end: 30,
     step: 0.5,
   },
-  CA: {
-    start: 16,
-    end: 32,
-    step: 0.5,
-  },
   CN: {
     start: 14,
     end: 30,

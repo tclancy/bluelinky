@@ -3,7 +3,6 @@ import got from 'got';
 
 import { AmericanController } from '../src/controllers/american.controller';
 import { EuropeanController } from '../src/controllers/european.controller';
-import { CanadianController } from '../src/controllers/canadian.controller';
 
 jest.mock('got');
 
@@ -11,7 +10,6 @@ const getController = region => {
   const referenceMap = {
     US: AmericanController,
     EU: EuropeanController,
-    CA: CanadianController,
   };
 
   const controller = new referenceMap[region]({
@@ -114,38 +112,5 @@ describe('EuropeanController', () => {
 
     const vehicles = await controller.getVehicles();
     expect(vehicles).toHaveLength(1);
-  });
-});
-
-describe('CanadianController', () => {
-  it('call getVehicles and check length', async () => {
-    const controller = getController('CA');
-    // `got` arm on purpose — see the note in vehicle.spec.ts and #26. The
-    // `fetch` arm is covered in canadian-transport.spec.ts.
-    (controller as CanadianController).useFetchTransport = false;
-
-    (got as any).mockReturnValueOnce({
-      body: {
-        responseHeader: {
-          responseCode: 0,
-        },
-        result: {
-          vehicles: [
-            {
-              nickname: 'Jest is best',
-              vin: '444',
-              regDate: 'test',
-              brandIndicator: 'H',
-              regId: '123123',
-              gen: '2',
-              name: 'Car',
-            },
-          ],
-        },
-      },
-      statusCode: 200,
-    });
-
-    expect(await controller.getVehicles()).toHaveLength(1);
   });
 });

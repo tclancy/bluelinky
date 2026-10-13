@@ -27,30 +27,21 @@ jobs:
         run: npx prettier --check './src/**/*.{js,jsx,ts,tsx}' './__tests__/**/*.{js,jsx,ts,tsx}' './*.ts'
   test:
     runs-on: ubuntu-latest
-    # Legs either side of the major-21 threshold, because the Canadian region
-    # picks its transport off it: `got` below 21, undici's `fetch` at or above
-    # (`src/tools/runtime.tools.ts`).
+    # 20 because that is what `Dockerfile`'s `ARG NODE_IMAGE` pins, so this is
+    # the interpreter plexpi actually executes; 24 and 25 for interpreter-level
+    # drift above it (#26 was a TLS regression WITHIN one transport arm, so
+    # drift is the failure this repo has actually had). The 20 leg is pinned to
+    # the image by `__tests__/node-matrix-gate.spec.ts`, derived from the
+    # Dockerfile -- bump the base image without adding its major here and the
+    # suite goes red.
     #
-    # What a second leg buys, stated narrowly -- #30's injectable
-    # `useFetchTransport` means BOTH arms already execute on a single
-    # interpreter, since the arm suites set the flag explicitly. So this does
-    # not add arm coverage. What it adds is the only check that the DEFAULT
-    # selection is right above the threshold. Measured on 2026-10-12,
-    # hard-wiring the field past `shouldUseFetchTransport()`:
-    #
-    #   = true   node 20 RED   node 24 green
-    #   = false  node 20 green node 24 RED
-    #
-    # Both die on `canadian-transport.spec.ts`'s default-wiring assertions and
-    # nothing else, which is exactly the point: a one-leg matrix can only ever
-    # catch a default that is wrong on its own side of the threshold. Before
-    # this change CI ran node 20 only, so `= false` -- the mutant that switches
-    # off the arm plexpi runs -- was green.
-    #
-    # 25 as well as 24: plexpi runs 25, and 24/25 differ in undici major and
-    # TLS defaults even though both take the `fetch` arm. #26 was a TLS
-    # regression WITHIN an arm, so interpreter-level drift is the failure this
-    # repo has actually had.
+    # WHAT THIS NO LONGER BUYS, because it used to and the comment outlived it.
+    # These legs were added for the Canadian transport fork, which picked `got`
+    # below Node 21 and undici's `fetch` at or above, so the pair graded a
+    # version-sensitive production DEFAULT. Issue #32 deleted that region. No
+    # assertion in the suite is version-sensitive now -- the legs run
+    # byte-identical tests on three interpreters. Whether that is worth three
+    # legs is issue #31, not something this comment should decide.
     strategy:
       fail-fast: false
       matrix:
