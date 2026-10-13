@@ -36,6 +36,7 @@
 - `status-json` is **unchanged**: `trans_cond` is deliberately not in the wire
   contract, which the exhaustive `toEqual` in `__tests__/status-json.spec.ts`
   now pins with a non-null fixture.
+
 ## 2026-10-11
 
 - **Two-stage Dockerfile.** The runtime image no longer carries the dev
