@@ -1,0 +1,84 @@
+# Build context for the fuel-monitor image.
+#
+# ALLOW-LIST, not a deny-list, and that shape is the point. `COPY . .` with no
+# .dockerignore at all baked `/app/.env` -- BLUELINK_USERNAME, BLUELINK_PASSWORD,
+# BLUELINK_PIN and the ntfy credentials, 460 bytes -- into an image layer on
+# plexpi, dated Apr 10 2026 and surviving every rebuild since. docker-compose.yml
+# mounts the real `.env` over it at runtime, so nothing ever surfaced it; it is
+# readable with `docker save` or `docker history` regardless, and would travel
+# with the image to any registry.
+#
+# A deny-list fails open: the next secret added at the repo root ships unless
+# somebody remembers to add a line here. This denies everything and re-admits
+# only what the RUNTIME needs, so the default for a new file at the repo root is
+# "not in the image". The cost is that a new runtime entrypoint must be
+# re-admitted below -- `__tests__/docker-image.spec.ts` derives the required set
+# from the tracked crontab and entrypoint, so forgetting turns that suite red
+# rather than the hourly cron job.
+#
+# READ THE SCOPE OF THAT GUARANTEE CAREFULLY, because an earlier draft of this
+# file overstated it and shipped. **Fail-closed holds at the repo root and
+# inside `deployment/`. It does NOT hold inside `src/`.** `!src` re-admits the
+# whole library -- there is no enumerating 40-odd files that change every time
+# someone adds a region -- so a new file anywhere under `src/` ships by default.
+# The trailing `**/*.env` block below is what stops the secrets-shaped half of
+# that; `src/credentials.json` would still ship, and nothing here can see it.
+# Measured against real BuildKit, not reasoned about: with `!deployment` as a
+# whole directory (the shape this file had until it was narrowed below),
+# `deployment/plexpi-secret.yaml` and `deployment/creds.env` both shipped.
+#
+# Excluding node_modules is load-bearing, not hygiene: the runtime stage copies
+# a dev-free tree from the `deps` stage and `COPY . .` runs AFTER it, so a host
+# node_modules in the context would overwrite it with whatever the box happens
+# to have installed. The box has none today, which is luck -- `npm ci` in the
+# checkout is one documented troubleshooting step away.
+*
+
+# Dependency manifests: `npm ci` needs BOTH, and refuses if they disagree.
+!package.json
+!package-lock.json
+
+# tsx reads this to resolve paths and compiler options.
+!tsconfig.json
+
+# Runtime entrypoints invoked by deployment/crontab and deployment/entrypoint.sh.
+!monitor.ts
+!monitor-fuel.ts
+!status-json.ts
+!get-fuel-level.ts
+!alert-backends.ts
+
+# The library itself. monitor.ts imports './src/index.ts' directly -- it does
+# NOT read dist/, which is why the image no longer builds one.
+!src
+
+# crontab + entrypoint.sh, NAMED INDIVIDUALLY rather than as `!deployment`.
+#
+# An earlier draft took the whole directory, on the stated grounds that per-file
+# re-inclusion under an excluded parent "relies on a BuildKit implementation
+# detail rather than something documented". That reason is wrong, and it was
+# checked rather than argued: a context built with `*` + `!deployment/crontab` +
+# `!deployment/entrypoint.sh` on docker 29.4 admits exactly those two files. It
+# is the documented `!` exception syntax, not a detail.
+#
+# The broad form was also not free. It shipped `deployment/README.md`, and it
+# meant any future `deployment/<anything>` -- a secret, a vault file, a
+# host-specific override -- would ship by default, which is the exact failure
+# this file's header claims to prevent.
+!deployment/crontab
+!deployment/entrypoint.sh
+
+# Secrets, last so no re-inclusion above can reach them. The root-level pair is
+# redundant against `*` and kept anyway, because the cost of being wrong here is
+# credentials in a published layer.
+#
+# `**/*.env` is NOT redundant and is the one line here that was missing. `**/`
+# means "zero or more directory levels", so `**/.env` matches `.env` and
+# `deployment/.env` and nothing else -- it does not match a file whose name
+# merely ENDS in `.env`. Verified against real BuildKit: without the line below,
+# `src/a.env` ships.
+.env
+.env.*
+**/.env
+**/.env.*
+**/*.env
