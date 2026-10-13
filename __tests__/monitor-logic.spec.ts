@@ -251,6 +251,11 @@ describe('checkRowFrom', () => {
     odometerMi: null,
     lastupdate: new Date('2026-09-19T11:04:00.000Z'),
     batteryCharge12v: 84,
+    // What the live Santa Fe reported on the 2026-10-12 probe, and what all
+    // four status mocks carry. Stated rather than omitted: `undefined` here
+    // would exercise only the absent branch, and this fixture is also the one
+    // the `toEqual` below pins, so it would quietly assert the wrong mapping.
+    transmissionCondition: true,
   };
 
   it('maps the car report time from lastupdate, not from ts', () => {
@@ -270,12 +275,26 @@ describe('checkRowFrom', () => {
       odometer_mi: null,
       car_reported_at: '2026-09-19T11:04:00.000Z',
       battery_12v_pct: 84,
+      trans_cond: 1,
     });
   });
 
   it('carries the 12V battery percentage the car reported', () => {
     // 84 is what the live Santa Fe returned on the 2026-10-07 probe.
     expect(checkRowFrom(run).battery_12v_pct).toBe(84);
+  });
+
+  it('threads transCond through as 1 / 0 / null (#23)', () => {
+    expect(checkRowFrom(run).trans_cond).toBe(1);
+    // A reported false is a reading. If the field ever does mean
+    // "transmission OK", this is the value worth having.
+    expect(checkRowFrom({ ...run, transmissionCondition: false }).trans_cond).toBe(0);
+    // Absent is not the same as clear. A car whose payload omitted the field
+    // must not be recorded as one that reported it false.
+    expect(checkRowFrom({ ...run, transmissionCondition: undefined }).trans_cond).toBeNull();
+    // And a non-boolean reaching here through the vendor cast is refused
+    // rather than coerced into a reading nobody gave.
+    expect(checkRowFrom({ ...run, transmissionCondition: 'true' }).trans_cond).toBeNull();
   });
 
   it('stores a reported 0 as 0, not as null', () => {

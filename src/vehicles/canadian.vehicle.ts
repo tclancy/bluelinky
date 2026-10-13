@@ -373,8 +373,7 @@ export default class CanadianVehicle extends Vehicle {
     // add logic for token refresh to ensure we don't use a stale token
     await this.controller.refreshAccessToken();
 
-    const [major, ,] = process.versions.node.split('.').map(Number);
-    if (major >= 21) {
+    if (this.controller.useFetchTransport) {
       body = {
         pin: this.userConfig.pin,
         ...body,
@@ -387,7 +386,7 @@ export default class CanadianVehicle extends Vehicle {
       // this request alone.
       // __tests__/canadian-tls-scope.spec.ts holds both halves of that, and bans
       // the variable by name across every shipped source file.
-      logger.debug('Node version >= 21, using fetch instead of got');
+      logger.debug('Using fetch instead of got');
       const options = {
         method: 'POST',
         body: JSON.stringify(body),

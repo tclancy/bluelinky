@@ -61,6 +61,18 @@ export interface CheckRow {
    * the declared type does not say so. Test it with `== null`, never `=== null`.
    */
   battery_12v_pct: number | null;
+
+  /**
+   * The raw payload's `transCond` as 1 / 0, or `null` when it was absent (#23).
+   *
+   * `INTEGER` rather than a SQLite boolean because SQLite has none, and the
+   * same three-state rule as `battery_12v_pct`: a row written before this
+   * column existed hands back `undefined` from a `SELECT *`, not `null`, so
+   * test it with `== null` and never `=== null`. `null` and `0` are different
+   * facts here -- `0` is the car reporting something, `null` is us not having
+   * asked yet -- which is the whole point of recording it.
+   */
+  trans_cond: number | null;
 }
 
 export interface TpmsRow {
@@ -91,7 +103,8 @@ const SCHEMA = `
     is_fillup   INTEGER NOT NULL DEFAULT 0,
     odometer_mi REAL,
     car_reported_at TEXT,
-    battery_12v_pct INTEGER
+    battery_12v_pct INTEGER,
+    trans_cond  INTEGER
   );
 
   CREATE TABLE IF NOT EXISTS tpms_readings (
@@ -146,6 +159,7 @@ export class VehicleDb {
     this.db.exec(SCHEMA);
     this.addColumnIfMissing('checks', 'car_reported_at', 'TEXT');
     this.addColumnIfMissing('checks', 'battery_12v_pct', 'INTEGER');
+    this.addColumnIfMissing('checks', 'trans_cond', 'INTEGER');
   }
 
   /**
@@ -184,8 +198,8 @@ export class VehicleDb {
   /** Insert a monitoring check. Returns the new row id. */
   insertCheck(row: Omit<CheckRow, 'id'>): number {
     const stmt = this.db.prepare(`
-      INSERT INTO checks (ts, vehicle_name, range_mi, temp_f, is_fillup, odometer_mi, car_reported_at, battery_12v_pct)
-      VALUES (@ts, @vehicle_name, @range_mi, @temp_f, @is_fillup, @odometer_mi, @car_reported_at, @battery_12v_pct)
+      INSERT INTO checks (ts, vehicle_name, range_mi, temp_f, is_fillup, odometer_mi, car_reported_at, battery_12v_pct, trans_cond)
+      VALUES (@ts, @vehicle_name, @range_mi, @temp_f, @is_fillup, @odometer_mi, @car_reported_at, @battery_12v_pct, @trans_cond)
     `);
     const result = stmt.run(row);
     return Number(result.lastInsertRowid);
@@ -287,6 +301,24 @@ export class VehicleDb {
  */
 export function batteryPctOrNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * `trans_cond`'s one coercion rule, for both sides of the round-trip (#23).
+ *
+ * Beside the column for the same reason as `batteryPctOrNull`: the reader and
+ * the writer need the identical predicate and must not drift.
+ *
+ * `typeof value === 'boolean'`, not a truthiness test. The field reaches here
+ * through an `as VehicleStatus` cast over a vendor parser, so its runtime type
+ * is a claim rather than a guarantee, and the two values this must never
+ * invent are the plausible ones: a truthy non-boolean would be recorded as a
+ * reported `true`, and `!!undefined` would record an absent field as a
+ * reported `false`. Anything that is not actually a boolean is `null` --
+ * "not reported" -- which is a state the column keeps distinct on purpose.
+ */
+export function transCondOrNull(value: unknown): number | null {
+  return typeof value === 'boolean' ? (value ? 1 : 0) : null;
 }
 
 /**

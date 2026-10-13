@@ -27,11 +27,39 @@ jobs:
         run: npx prettier --check './src/**/*.{js,jsx,ts,tsx}' './__tests__/**/*.{js,jsx,ts,tsx}' './*.ts'
   test:
     runs-on: ubuntu-latest
+    # Legs either side of the major-21 threshold, because the Canadian region
+    # picks its transport off it: `got` below 21, undici's `fetch` at or above
+    # (`src/tools/runtime.tools.ts`).
+    #
+    # What a second leg buys, stated narrowly -- #30's injectable
+    # `useFetchTransport` means BOTH arms already execute on a single
+    # interpreter, since the arm suites set the flag explicitly. So this does
+    # not add arm coverage. What it adds is the only check that the DEFAULT
+    # selection is right above the threshold. Measured on 2026-10-12,
+    # hard-wiring the field past `shouldUseFetchTransport()`:
+    #
+    #   = true   node 20 RED   node 24 green
+    #   = false  node 20 green node 24 RED
+    #
+    # Both die on `canadian-transport.spec.ts`'s default-wiring assertions and
+    # nothing else, which is exactly the point: a one-leg matrix can only ever
+    # catch a default that is wrong on its own side of the threshold. Before
+    # this change CI ran node 20 only, so `= false` -- the mutant that switches
+    # off the arm plexpi runs -- was green.
+    #
+    # 25 as well as 24: plexpi runs 25, and 24/25 differ in undici major and
+    # TLS defaults even though both take the `fetch` arm. #26 was a TLS
+    # regression WITHIN an arm, so interpreter-level drift is the failure this
+    # repo has actually had.
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20, 24, 25]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ matrix.node-version }}
       - run: npm ci
       - run: npm test
   build:

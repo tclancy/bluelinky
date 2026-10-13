@@ -128,10 +128,74 @@ describe('AmericanVehicle', () => {
     const response = await vehicle.status({ parsed: true });
     expect(response.engine.range).toEqual(AMERICAN_STATUS_MOCK.dte.value);
   });
+
+  /**
+   * `transCond` on the parsed status (#23).
+   *
+   * `status({ parsed: true })` throws the raw body away -- `this._status` holds
+   * one shape or the other -- so before this the only way to read the field was
+   * a second API call, which wakes nothing but spends quota and 12V budget the
+   * hourly monitor does not have. These pin that the single existing call
+   * carries it.
+   *
+   * Three cases, not one, because the mapping must keep `undefined` and `false`
+   * apart. Every sibling in this `chassis` block is `!!`-coerced, so the
+   * tempting edit is to make this one match them -- and that edit records a
+   * car that never reported the field as one that reported it clear. The
+   * absent-payload case below is what fails when someone makes it.
+   */
+  it('surfaces transCond from the raw payload onto the parsed chassis', async () => {
+    gotMock.mockReturnValueOnce({
+      body: JSON.stringify({ vehicleStatus: AMERICAN_STATUS_MOCK }),
+      statusCode: 200,
+    });
+
+    const response = await vehicle.status({ parsed: true });
+    // The mock says true, and so did the live car on 2026-10-12. Asserted
+    // against the mock rather than a literal so the two cannot drift.
+    expect(AMERICAN_STATUS_MOCK.transCond).toBe(true);
+    expect(response.chassis.transmissionCondition).toBe(true);
+  });
+
+  it('carries a reported false as false, not as undefined', async () => {
+    gotMock.mockReturnValueOnce({
+      body: JSON.stringify({
+        vehicleStatus: { ...AMERICAN_STATUS_MOCK, transCond: false },
+      }),
+      statusCode: 200,
+    });
+
+    const response = await vehicle.status({ parsed: true });
+    expect(response.chassis.transmissionCondition).toBe(false);
+    // Not merely falsy: `undefined` is also falsy and means something else.
+    expect(response.chassis.transmissionCondition).not.toBeUndefined();
+  });
+
+  it('leaves the field undefined when the payload omits it', async () => {
+    const withoutTransCond = { ...AMERICAN_STATUS_MOCK } as Record<string, unknown>;
+    delete withoutTransCond.transCond;
+    gotMock.mockReturnValueOnce({
+      body: JSON.stringify({ vehicleStatus: withoutTransCond }),
+      statusCode: 200,
+    });
+
+    const response = await vehicle.status({ parsed: true });
+    // The `!!` coercion its siblings use would make this `false` -- a reading
+    // the car never gave. This is the assertion that forbids that edit.
+    expect(response.chassis.transmissionCondition).toBeUndefined();
+  });
 });
 
 describe('CanadianVehicle', () => {
   const vehicle: CanadianVehicle = getVehicle('CA');
+
+  // Every mock in this suite is a `got` mock, so pin the transport to the `got`
+  // arm rather than letting the local interpreter pick it. Before #26 this was
+  // implicit and the suite passed only on Node < 21; on Node >= 21 the Canadian
+  // request paths used undici's `fetch`, these mocks intercepted nothing and the
+  // tests made real network calls. The `fetch` arm has its own coverage in
+  // `canadian-transport.spec.ts`.
+  vehicle.controller.useFetchTransport = false;
 
   it('define new vehicle', () => {
     expect(vehicle.nickname()).toEqual('Jest is best');

@@ -10,6 +10,7 @@ import { SessionController } from './controller';
 import logger from '../logger';
 import { VehicleRegisterOptions } from '../interfaces/common.interfaces';
 import { manageBluelinkyError } from '../tools/common.tools';
+import { describeFetchTransport, shouldUseFetchTransport } from '../tools/runtime.tools';
 
 export interface CanadianBlueLinkyConfig extends BlueLinkyConfig {
   region: 'CA';
@@ -18,9 +19,26 @@ export interface CanadianBlueLinkyConfig extends BlueLinkyConfig {
 export class CanadianController extends SessionController<CanadianBlueLinkyConfig> {
   private _environment: CanadianBrandEnvironment;
 
+  /**
+   * Which HTTP transport the Canadian region uses — `fetch` (undici) or `got`.
+   *
+   * Resolved once from the running interpreter and shared by this controller
+   * and every `CanadianVehicle` it owns, so the two request paths cannot
+   * disagree.
+   *
+   * It is a **test seam**, not a supported configuration knob: assigning it is
+   * how `__tests__/canadian-transport.spec.ts` exercises both arms on one
+   * interpreter (#26). Production code should leave it alone.
+   */
+  public useFetchTransport: boolean = shouldUseFetchTransport();
+
   constructor(userConfig: CanadianBlueLinkyConfig) {
     super(userConfig);
     logger.debug('CA Controller created');
+    // The interpreter's own choice, logged once. The per-request line below
+    // reports the choice actually taken, so a test override is visible as a
+    // disagreement between the two rather than silently replacing the reason.
+    logger.debug(`CA transport: ${describeFetchTransport()}`);
     this._environment = getBrandEnvironment(userConfig.brand);
   }
 
@@ -113,8 +131,7 @@ export class CanadianController extends SessionController<CanadianBlueLinkyConfi
   /* eslint-disable @typescript-eslint/no-explicit-any */
   private async request(endpoint, body: any, headers: any = {}): Promise<any | null> {
     logger.debug(`[${endpoint}] ${JSON.stringify(headers)} ${JSON.stringify(body)}`);
-    const [major, ,] = process.versions.node.split('.').map(Number);
-    if (major >= 21) {
+    if (this.useFetchTransport) {
       // Do not relax TLS verification through the environment here (#37). Node's
       // reject-unauthorized env switch is process-wide and nothing restores it, so
       // setting it would strip certificate verification from every later HTTPS call
@@ -123,7 +140,7 @@ export class CanadianController extends SessionController<CanadianBlueLinkyConfi
       // this request alone.
       // __tests__/canadian-tls-scope.spec.ts holds both halves of that, and bans
       // the variable by name across every shipped source file.
-      logger.debug('Node version >= 21, using fetch instead of got');
+      logger.debug('Using fetch instead of got');
       const options = {
         method: 'POST',
         body: JSON.stringify(body),
