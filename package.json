@@ -25,7 +25,6 @@
     "test-alert-tpms": "TEST_ALERT=tpms tsx monitor.ts",
     "eu:export:cfb": "cross-env LOG_LEVEL=debug ts-node ./scripts/export_eu_cfb.ts",
     "au:export:cfb": "cross-env LOG_LEVEL=debug ts-node ./scripts/export_au_cfb.ts",
-    "test-ca": "npm run build && node test-ca.js",
     "watch": "tsc -w"
   },
   "author": "Hacksore",

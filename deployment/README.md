@@ -434,7 +434,10 @@ is what plexpi's container reports today (v20.20.2) and what CI's lower leg
 runs. Node 20 is past end-of-life (2026-04-30) and the pin should move; the
 remaining work is testing the bump against this box, not deciding a transport.
 `__tests__/node-matrix-gate.spec.ts` requires CI to carry a leg for whichever
-major `ARG NODE_IMAGE` resolves to, so a bump with no matching leg is red.
+major `ARG NODE_IMAGE` resolves to, so a bump with no matching leg is red --
+but note the matrix already carries 24 and 25, so a bump to either of those
+passes that gate silently. It catches every major except the three already in
+the matrix.
 
 ## Stopping the Monitor
 

@@ -37,6 +37,32 @@
   2026-04-30. Bumping the image is now an ordinary maintenance change that needs
   testing against plexpi, not a transport decision. `deployment/README.md` is
   corrected to say so.
+- **The repo-wide ban on `NODE_TLS_REJECT_UNAUTHORIZED` survives the deletion**,
+  as `__tests__/tls-global-scope.spec.ts`. It was the third `describe` block of
+  the deleted `canadian-tls-scope.spec.ts` and was never Canada-specific: it
+  walks `src/`, `scripts/` and every root source file -- including
+  `jest.config.cjs`, which executes inside the test process -- and bans the
+  identifier outright. #32's own analysis named this the one item that holds
+  "under every option, including deletion", because "'unreachable' is a weaker
+  guarantee than 'absent'". Its two Canada reachability assertions are replaced
+  with surviving request paths and its scan floor is re-measured 52 -> 49.
+- **`.env.example` no longer advertises `CA` as a legal region**, and
+  `__tests__/deploy-docs.spec.ts` now gates that prose against `REGIONS`. The
+  comment above `BLUELINK_REGION=US` still listed `CA` after the region was
+  deleted, and `src/index.ts` THROWS on an unknown region -- measured in the
+  built image, `BLUELINK_REGION=CA npx tsx monitor.ts` dies on an unhandled
+  `Your region is not supported yet.` So a stale name in the file
+  `deployment/README.md` tells a human to copy is a broken cron job, not a
+  typo. The same `CA` example is dropped from the bug-report issue template,
+  and the dead `test-ca` npm script -- an upstream leftover pointing at a
+  `test-ca.js` that is not in the tree -- is removed.
+- **Correction, measured rather than inherited: `ci.yaml` justified its node 25
+  leg with "plexpi runs 25", and plexpi has no host node at all.** Not on the
+  login-shell PATH, no `/usr/bin/node`, no nvm or fnm install, no `nodejs`
+  package; the only node on the box is **v20.20.2 inside the container**. 25 is
+  this Mac's version, attributed to the wrong host. The 25 leg therefore has no
+  measured justification and never did -- which is input to issue #31 rather
+  than a reason to drop it here. The comment now records the measurement.
 - **`MEASURED_IMAGE_FILES` re-measured: 46 files**, from a real
   `docker build --platform linux/arm64` on docker 29.8.2 / buildx 0.37.2, down
   from 50 by exactly the four deleted source files. Regenerated from the build rather than

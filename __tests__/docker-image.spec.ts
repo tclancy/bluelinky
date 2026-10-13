@@ -8,9 +8,8 @@ import path from 'path';
  *
  *   1. 1.22 GB, 458 top-level node_modules directories, with `jest`, `rollup`,
  *      `eslint`, `typescript` and `prettier` in the runtime filesystem, plus
- *      `python3`, `make` and `g++`. The runtime dependency list is six
- *      packages -- seven until #32 deleted the Canadian region, which was the
- *      only thing importing `undici`.
+ *      `python3`, `make` and `g++`. The runtime dependency list is seven
+ *      packages.
  *   2. `/app/.env` -- BLUELINK_USERNAME, BLUELINK_PASSWORD, BLUELINK_PIN and the
  *      ntfy credentials, 460 bytes, dated Apr 10 2026 -- baked into an image
  *      layer by `COPY . .` with no `.dockerignore` in the repo at all.
@@ -51,10 +50,16 @@ const BUILD_TOOLCHAIN = ['python3', 'make', 'g++', 'gcc'];
 /**
  * `find . -type f` from `/app` in the image this branch builds, excluding
  * `node_modules/` and `state/` (the two trees the Dockerfile creates rather
- * than copies). **Re-measured 2026-10-13 19:5x ET** on `docker build
+ * than copies). **Re-measured 2026-10-13** on `docker build
  * --platform linux/arm64`, docker 29.8.2 / buildx 0.37.2 (read off `docker
  * version`, not copied -- see below), against the .dockerignore in this
  * commit: 46 files. 50 before this change; 49 on 2026-10-11.
+ *
+ * The figures in the suite docblock at the top of this file are NOT updated by
+ * this change and must not be: they are a dated record of the live plexpi image
+ * on 2026-10-11, including "the runtime dependency list is seven packages",
+ * which was true then. It is six now -- #32 removed `undici` -- and the
+ * present-tense figure belongs in `deployment/README.md`, which carries it.
  *
  * WHY IT MOVED, because the next reader will meet this again (issues #40, #42).
  * Issue #32 deleted the Canadian region, and four of the 50 entries were its

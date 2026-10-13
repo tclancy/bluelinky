@@ -27,21 +27,34 @@ jobs:
         run: npx prettier --check './src/**/*.{js,jsx,ts,tsx}' './__tests__/**/*.{js,jsx,ts,tsx}' './*.ts'
   test:
     runs-on: ubuntu-latest
-    # 20 because that is what `Dockerfile`'s `ARG NODE_IMAGE` pins, so this is
-    # the interpreter plexpi actually executes; 24 and 25 for interpreter-level
-    # drift above it (#26 was a TLS regression WITHIN one transport arm, so
-    # drift is the failure this repo has actually had). The 20 leg is pinned to
-    # the image by `__tests__/node-matrix-gate.spec.ts`, derived from the
-    # Dockerfile -- bump the base image without adding its major here and the
-    # suite goes red.
+    # 20 is the interpreter production executes: it is what `Dockerfile`'s
+    # `ARG NODE_IMAGE` pins, and the container on plexpi reports v20.20.2
+    # (measured 2026-10-13 via `docker exec bluelinky-fuel-monitor node -v`).
+    # That leg is pinned to the image by `__tests__/node-matrix-gate.spec.ts`,
+    # derived from the Dockerfile -- bump the base image without adding its
+    # major here and the suite goes red.
+    #
+    # 24 and 25 buy interpreter-level drift above it, and nothing narrower.
+    # #26 was a TLS regression WITHIN one transport arm, so drift is a failure
+    # this repo has actually had -- but see the correction below before reading
+    # that as a measured justification for these two specific majors.
     #
     # WHAT THIS NO LONGER BUYS, because it used to and the comment outlived it.
     # These legs were added for the Canadian transport fork, which picked `got`
     # below Node 21 and undici's `fetch` at or above, so the pair graded a
-    # version-sensitive production DEFAULT. Issue #32 deleted that region. No
-    # assertion in the suite is version-sensitive now -- the legs run
-    # byte-identical tests on three interpreters. Whether that is worth three
-    # legs is issue #31, not something this comment should decide.
+    # production DEFAULT that was sensitive to the running major. Issue #32
+    # deleted that region. Nothing in the suite reads the running major now --
+    # the legs run byte-identical tests on three interpreters.
+    #
+    # AND ONE FIGURE HERE WAS WRONG BEFORE #32 TOUCHED IT. The previous version
+    # of this comment justified the 25 leg with "plexpi runs 25". Measured
+    # 2026-10-13: plexpi has no host node at all -- not on the login-shell
+    # PATH, no `/usr/bin/node`, no nvm or fnm install, no `nodejs` package --
+    # and the only node on the box is v20.20.2 inside the container. 25 is this
+    # Mac's version, attributed to the wrong host. So the 25 leg has no
+    # measured justification, and never did. Whether three legs is still the
+    # right number is issue #31; this comment records what is known rather than
+    # deciding it.
     strategy:
       fail-fast: false
       matrix:

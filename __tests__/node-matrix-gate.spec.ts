@@ -143,6 +143,13 @@ describe('the CI node-version matrix', () => {
     //
     // The property is containment, not a literal: `node:24-slim` with a
     // `[20, 24, 25]` matrix passes; `node:22-slim` with the same matrix fails.
+    //
+    // Which bounds what this catches, stated rather than implied: the uncaught
+    // set is exactly the majors already in the matrix. A bump from 20 to 24 or
+    // 25 is green here, because CI really would be running that interpreter.
+    // What it cannot grade is whether the suite PASSES on the new major -- that
+    // is the leg itself doing its job, and it is why this is a containment
+    // check and not the whole of the gate.
     expect(matrixMajors()).toContain(runtimeImageMajor());
   });
 
