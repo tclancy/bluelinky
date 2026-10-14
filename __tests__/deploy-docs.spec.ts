@@ -213,8 +213,18 @@ function read(file: string): string {
  *
  * Newlines are flattened first because the list wraps across source lines, so
  * a line-oriented match would see only its first two or three entries.
+ *
+ * The terminator is a period followed by WHITESPACE (or end of input), not a
+ * bare period. A bare `[^.]*` stops at the first `.` of any kind, so one
+ * dotted package name -- `socket.io`, `lodash.merge`, `node.extend`, all
+ * ordinary -- would truncate the capture mid-name and hand the comparison a
+ * short set. That fails loudly rather than silently, because of the
+ * reachability floors below, but it fails pointing at the README when the
+ * README is right. A period inside a package name is never followed by
+ * whitespace, so the sentence-end form reads dotted names correctly; the
+ * third control case in the parser test is a dotted name for exactly this.
  */
-const RUNTIME_DEPS_PROSE = /runtime npm dependencies only:([^.]*)\./;
+const RUNTIME_DEPS_PROSE = /runtime npm dependencies only:(.*?)\.(?:\s|$)/;
 
 function documentedRuntimeDeps(markdown: string): Set<string> {
   const match = RUNTIME_DEPS_PROSE.exec(markdown.replace(/\r?\n\s*/g, ' '));
@@ -224,9 +234,29 @@ function documentedRuntimeDeps(markdown: string): Set<string> {
   return new Set([...match[1].matchAll(/`([^`]+)`/g)].map(entry => entry[1]));
 }
 
-/** The packages a production install actually carries, from the manifest. */
-function declaredRuntimeDeps(): Set<string> {
-  return new Set(Object.keys(JSON.parse(read('package.json')).dependencies ?? {}));
+/**
+ * The packages a production install actually carries, from the manifest.
+ *
+ * All THREE non-dev keys, not just `dependencies`. `npm ci --omit=dev` -- which
+ * is what the image's `deps` stage runs -- installs `optionalDependencies` and
+ * `peerDependencies` too, so a package declared under either ships into the
+ * runtime image while a `dependencies`-only reader stays green. Neither key
+ * exists in this manifest today, which is precisely why reading only the first
+ * one looks correct: the gap is latent, and the day somebody adds an optional
+ * dependency is the day it would matter and the day nothing would say so.
+ *
+ * Takes the manifest TEXT rather than reading the file, so the test below can
+ * drive it with a synthetic manifest carrying all three keys. A union over
+ * keys that are all absent from the real file is a branch no live fixture can
+ * reach, and an unreachable branch is indistinguishable from a wrong one.
+ */
+function declaredRuntimeDeps(manifest: string): Set<string> {
+  const parsed = JSON.parse(manifest);
+  return new Set([
+    ...Object.keys(parsed.dependencies ?? {}),
+    ...Object.keys(parsed.optionalDependencies ?? {}),
+    ...Object.keys(parsed.peerDependencies ?? {}),
+  ]);
 }
 
 /**
@@ -653,7 +683,7 @@ describe('deploy surface (issue #18)', () => {
   // answerable to package.json too.
   it('enumerates exactly the runtime dependencies package.json declares', () => {
     const documented = documentedRuntimeDeps(read('deployment/README.md'));
-    const declared = declaredRuntimeDeps();
+    const declared = declaredRuntimeDeps(read('package.json'));
 
     // Reachability on both sides. `toEqual` between two empty sets passes, so
     // a parser that quietly stopped matching -- a reworded bullet, a renamed
@@ -674,6 +704,13 @@ describe('deploy surface (issue #18)', () => {
     // Scope: the live bullet names `push-receiver` in the clause recording its
     // removal. Picking that up would fail the guard above against a manifest
     // that is correct.
+    //
+    // This half EXPIRES. It is an assertion about transitional prose -- the
+    // "`push-receiver` was here until issue #24 removed it" sentence -- and
+    // the day somebody tidies that sentence away it becomes vacuous with no
+    // signal that it stopped testing anything. The synthetic below is the
+    // durable half; if you delete the sentence, delete this line with it
+    // rather than leaving an assertion that cannot fail.
     expect(documentedRuntimeDeps(read('deployment/README.md')).has('push-receiver')).toBe(false);
 
     // Reachability for that absence -- on its own it also passes when the
@@ -683,5 +720,44 @@ describe('deploy surface (issue #18)', () => {
     const synthetic =
       '- The runtime npm dependencies only: `alpha`, `beta`. Then prose about\n  `gamma`, which is not a dependency.';
     expect([...documentedRuntimeDeps(synthetic)].sort()).toEqual(['alpha', 'beta']);
+
+    // A dotted package name. `socket.io` carries the terminator the old
+    // `[^.]*` form stopped at, so under that form this capture ended at
+    // "`socket" and the test read `['alpha']` -- a short set presented as the
+    // documented list. Driven rather than argued: this case fails on the
+    // previous regex and passes on the current one.
+    const dotted =
+      '- The runtime npm dependencies only: `alpha`, `socket.io`, `lodash.merge`. Then prose.';
+    expect([...documentedRuntimeDeps(dotted)].sort()).toEqual([
+      'alpha',
+      'lodash.merge',
+      'socket.io',
+    ]);
+  });
+
+  it('counts optionalDependencies and peerDependencies as runtime, not just dependencies', () => {
+    // `npm ci --omit=dev` installs all three, so all three ship in the image.
+    // The real package.json declares only `dependencies`, which means the
+    // union over the other two keys is a branch no live fixture reaches --
+    // this synthetic manifest is what makes it answerable to anything.
+    const manifest = JSON.stringify({
+      dependencies: { alpha: '^1.0.0' },
+      optionalDependencies: { beta: '^2.0.0' },
+      peerDependencies: { gamma: '^3.0.0' },
+      devDependencies: { jest: '^30.0.0' },
+    });
+    expect([...declaredRuntimeDeps(manifest)].sort()).toEqual(['alpha', 'beta', 'gamma']);
+
+    // And devDependencies stay out -- the assertion above would also pass if
+    // the reader took every key in the manifest, which is the opposite error.
+    expect(declaredRuntimeDeps(manifest).has('jest')).toBe(false);
+
+    // Control: the live manifest declares only `dependencies` today, so if a
+    // future edit adds one of the other two keys, the equality guard above is
+    // already reading it. This asserts the premise of that sentence rather
+    // than trusting it.
+    const live = JSON.parse(read('package.json'));
+    expect(live.optionalDependencies ?? null).toBeNull();
+    expect(live.peerDependencies ?? null).toBeNull();
   });
 });

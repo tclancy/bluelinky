@@ -589,9 +589,7 @@ docker exec bluelinky-fuel-monitor /bin/bash -c 'echo "{\"alert50Sent\":false,\"
   2026-10-11.
 - Internet connection for the Bluelink API and the configured alert backend
 
-**The container provides** (as built from this checkout -- the image running on
-plexpi keeps whatever it was last built with, so the `push-receiver` saving
-below lands on the next rebuild, not on merge)**:**
+**The container provides:**
 
 - Node.js 20 (pinned -- see "What the image contains" above; past end-of-life,
   and since #32 nothing in the tree branches on the running major)
@@ -601,6 +599,9 @@ below lands on the next rebuild, not on merge)**:**
   only thing importing it; `push-receiver` was here until issue #24 removed it:
   it was declared and never imported, and its subtree was 69 of the 166 packages
   a production install carried.
+  - The saving lands on the next **rebuild**, not on merge: the image running on
+    plexpi keeps whatever it was last built with. Every other bullet in this
+    list is a property of the checkout and is unaffected by that.
 - cron daemon
 - All TypeScript files
 - Isolated filesystem
