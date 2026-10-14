@@ -2,6 +2,20 @@
 
 ## 2026-10-12
 
+- **The Canadian arm no longer disables TLS certificate verification
+  process-wide.** Both Canadian request paths set
+  `process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'` before their `fetch` call,
+  and nothing restored it — so once either ran, every later HTTPS call anything
+  in the process made skipped certificate verification for the life of that
+  process, including the US Bluelink calls `monitor.ts` makes hourly and the
+  outdoor-temperature `fetch` in `monitor-helpers.ts`, which carries no
+  dispatcher of its own. The per-request undici `Agent` in the same request
+  options -- fifteen lines below each assignment, not four as #37 and #32 both
+  say -- already did the same relaxation scoped to the one request, so this is a
+  deletion rather than a rewrite. Latent, not live: `BLUELINK_REGION`
+  defaults to `US` and nothing selects `CA`, so the lines never executed in the
+  deployment — they did execute on any node >= 21 running the test suite
+  (issue #37).
 - Add `checks.trans_cond`, populated from the raw payload's `transCond` via the
   parsed status's new optional `chassis.transmissionCondition`. Migrated in
   place with the same idempotent `ALTER TABLE`; existing rows keep a null.
@@ -22,6 +36,7 @@
 - `status-json` is **unchanged**: `trans_cond` is deliberately not in the wire
   contract, which the exhaustive `toEqual` in `__tests__/status-json.spec.ts`
   now pins with a non-null fixture.
+
 ## 2026-10-11
 
 - **Two-stage Dockerfile.** The runtime image no longer carries the dev

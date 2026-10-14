@@ -378,7 +378,14 @@ export default class CanadianVehicle extends Vehicle {
         pin: this.userConfig.pin,
         ...body,
       };
-      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+      // Do not relax TLS verification through the environment here (#37). Node's
+      // reject-unauthorized env switch is process-wide and nothing restores it, so
+      // setting it would strip certificate verification from every later HTTPS call
+      // in the process -- including the US ones the monitor makes. The `dispatcher`
+      // Agent in the same options object below does the same relaxation, scoped to
+      // this request alone.
+      // __tests__/canadian-tls-scope.spec.ts holds both halves of that, and bans
+      // the variable by name across every shipped source file.
       logger.debug('Using fetch instead of got');
       const options = {
         method: 'POST',
