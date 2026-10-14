@@ -70,6 +70,33 @@
   measurement on 2026-10-11, this is the second time an unrelated change to
   `src/` has moved it -- PR #30 added the 50th file, this removes four -- and
   the open design question is issue #42.
+- **`push-receiver` is removed.** It was declared in `dependencies` by
+  `ae0218a` ("Completed EU login") and the consumer never landed: no tracked
+  file imports it, and `git log -S'push-receiver' -- package.json` returns that
+  one commit with no later removal. The controllers do register a push token
+  with the vendor API (`pushType: 'GCM'`, plus `GCMSenderID` constants), but
+  that is the _registration_ half and it uses `got`; nothing ever opened a
+  channel to receive. Tom's ruling on #24: "No current plans to receive push
+  notifications, so it can go." One line plus the regenerated lockfile, no
+  source change, because there is no source (issue #24).
+- **Measured on a real `npm ci --omit=dev`, not by walking the lockfile.** The
+  production install goes **166 packages to 97** (and 141 top-level
+  `node_modules` directories to 88) -- a delta of **-69**, which is 42% of the
+  production tree. #24's own body quotes the same -69 but states the absolutes
+  as 160 -> 91; both figures were six low, because a lockfile walk and an
+  actual install do not count the same set. The `-69` and the prod+dev
+  898 -> 843 both reproduce exactly.
+- **Four deprecation warnings go, not three, and one stays that the ticket
+  never mentioned.** Captured from `npm ci --omit=dev` before and after:
+  `request@2.88.2`, `request-promise@4.2.6`, `har-validator@5.1.5` and
+  `uuid@3.4.0` all disappear. **`prebuild-install@7.1.3` remains** -- it is a
+  `better-sqlite3` build-time dependency and has nothing to do with
+  `push-receiver`, so a production install is quieter but not silent. Worth
+  knowing before reading the next quiet-install claim.
+- No version churn in the lockfile: zero added `"version"` or `"resolved"`
+  lines, and `npm ci --dry-run` resolves cleanly. The 44 insertions are
+  `"dev": true` markers on the 14 packages that remain reachable from
+  `devDependencies`, plus re-hoisted `integrity` lines.
 
 ## 2026-10-12
 

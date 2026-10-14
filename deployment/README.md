@@ -593,10 +593,12 @@ docker exec bluelinky-fuel-monitor /bin/bash -c 'echo "{\"alert50Sent\":false,\"
 
 - Node.js 20 (pinned -- see "What the image contains" above; past end-of-life,
   and since #32 nothing in the tree branches on the running major)
-- The runtime npm dependencies only: `better-sqlite3`, `got`, `push-receiver`,
-  `tough-cookie`, `tsx`, `winston`. The lint, test and bundling toolchain is not
-  in the image. `undici` was here until issue #32 deleted the Canadian region,
-  which was the only thing importing it.
+- The runtime npm dependencies only: `better-sqlite3`, `got`, `tough-cookie`,
+  `tsx`, `winston`. The lint, test and bundling toolchain is not in the image.
+  `undici` was here until issue #32 deleted the Canadian region, which was the
+  only thing importing it; `push-receiver` was here until issue #24 removed it:
+  it was declared and never imported, and its subtree was 69 of the 166 packages
+  a production install carried.
 - cron daemon
 - All TypeScript files
 - Isolated filesystem
