@@ -23,9 +23,17 @@
 # that outright -- `tsx` is still resolved at runtime, just from `dependencies`
 # now. See the note on the COPY below for why that trade was taken.
 
-# The runtime interpreter. 24 is the active even-numbered LTS line; node 20
-# went end-of-life 2026-04-30 and this pin was the last thing in the repo still
-# on it (issue #44).
+# The runtime interpreter. 24 is an LTS line, supported to 2028-04-30 (it
+# enters Maintenance 2026-10-20); node 20 went end-of-life 2026-04-30 and this
+# pin was the last thing in the repo still on it (issue #44). Dates off
+# `nodejs/Release`'s `schedule.json`, fetched 2026-10-14 -- stated as dates
+# rather than as a status like "current LTS", which is a label that expires
+# without anything editing this file.
+#
+# Not 26, which is the Current line and becomes Active LTS 2026-10-28: too
+# early for a production pin, which is exactly why it is CI's second leg
+# instead. Not 22 either -- in Maintenance since 2025-10-21, ending 2027-04-30,
+# so it would be a shorter runway and another bump sooner.
 #
 # It was held below 21 until #32, because `canadian.controller.ts` and
 # `canadian.vehicle.ts` branched on `process.versions.node >= 21` -- `got`

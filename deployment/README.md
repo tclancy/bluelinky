@@ -431,7 +431,8 @@ maintenance change rather than a transport decision.** The pin was held below
 transport. Issue #32 deleted the Canadian region and both arms with it, and
 nothing in the tree reads the running major now, which is what reduced the bump
 to a version change (issue #44). Node 20 went end-of-life on 2026-04-30; 24 is
-the active even-numbered LTS line.
+an LTS line supported to 2028-04-30, entering Maintenance 2026-10-20. Dates off
+`nodejs/Release`'s `schedule.json`, fetched 2026-10-14.
 
 **The one real risk was `better-sqlite3`, and it was measured rather than
 assumed.** Its Node-API addon is rebuilt from source in the `deps` stage when
@@ -446,25 +447,35 @@ is still the expensive part discussed above.
 the major off `ARG NODE_IMAGE` and requires the `test` matrix to carry a leg for
 it, so a future bump with no matching leg goes red rather than shipping an
 untested interpreter. What it cannot catch is a bump to a major the matrix
-_already_ lists -- the matrix is `[24, 25]`, so moving the pin to 25 would pass
-silently. Reading the gate's own docblock before moving the pin is the mitigation;
-there is no narrower one, because a leg that exists really does test that
-interpreter.
+_already_ lists -- the matrix is `[24, 26]`, so moving the pin to 26 would pass
+silently. That is not a defect: a leg that exists really does run the suite on
+that interpreter, so there is no narrower mitigation available than reading the
+gate's own docblock before moving the pin. What the gate cannot tell you either
+way is whether the suite PASSES on the new major; that is the leg's job, which
+is why 26 was measured green (194/194 on v26.11.1) before it was added rather
+than inferred from the leg's existence.
 
-To apply the bump on the box, from `~/bluelinky`:
+Applying the bump on the box is the ordinary code-update path -- see
+["Updating the Code"](#updating-the-code) below for the command and for why
+`--build` is required rather than optional. Nothing about this bump needs a
+different procedure; in particular `docker compose up -d` on its own reuses the
+existing image, so without `--build` the container keeps running node 20 while
+the Dockerfile says 24.
 
-```bash
-docker compose up -d --build
-```
-
-The `--build` is load-bearing: without it compose reuses the existing image and
-the container keeps running node 20 while the Dockerfile says 24. Confirm the
-interpreter and then the next scheduled run:
+The one step worth adding afterwards is reading the interpreter back, because
+that is the thing this change is about and no other step reports it:
 
 ```bash
 docker exec bluelinky-fuel-monitor node -v
-docker exec bluelinky-fuel-monitor npx tsx /app/status-json.ts
 ```
+
+Expect `v24.x`. Then confirm a run actually writes a history row -- issue #44's
+last Done-when -- either by waiting for the top of the hour and reading
+`/var/log/fuel-monitor/cron.log`, or by forcing one with the **Manual test
+run** command under ["Quick Reference Commands"](#quick-reference-commands) --
+`monitor.ts`, with the `export` that section explains, because `docker exec`
+does not read `/etc/environment`. `status-json.ts` is the _reader_ and writes
+nothing, so it confirms the row only after `monitor.ts` has written one.
 
 ## Stopping the Monitor
 
@@ -611,15 +622,20 @@ docker exec bluelinky-fuel-monitor /bin/bash -c 'echo "{\"alert50Sent\":false,\"
 - Docker Engine 20.10+
 - The `docker compose` plugin (v2+); the hyphenated v1 binary is not used
 - ~1GB disk space for the image, its build cache and the state volume. The image
-  itself is 266 MB as of issue #25 (it was 1.22 GB before); BuildKit's cache is
+  itself is 291 MB as of issue #44 -- measured off a `--platform linux/arm64`
+  build on an aarch64 Mac, so it is the image's size and not plexpi's build
+  cost. It was 266 MB on node 20 (issue #25) and 1.22 GB before that, so the
+  node 24 base costs about 25 MB. BuildKit's cache is
   the part that grows, and `docker system df` on plexpi showed 32.6 GB of it on
   2026-10-11.
 - Internet connection for the Bluelink API and the configured alert backend
 
 **The container provides:**
 
-- Node.js 20 (pinned -- see "What the image contains" above; past end-of-life,
-  and since #32 nothing in the tree branches on the running major)
+- Node.js 24 (pinned -- see "What the image contains" above; LTS line,
+  supported to 2028-04-30, per `nodejs/Release`'s `schedule.json`). It was
+  node 20 until issue #44; nothing in the tree branches on the running major,
+  so the bump was a version change rather than a transport decision.
 - The runtime npm dependencies only: `better-sqlite3`, `got`, `push-receiver`,
   `tough-cookie`, `tsx`, `winston`. The lint, test and bundling toolchain is not
   in the image. `undici` was here until issue #32 deleted the Canadian region,
