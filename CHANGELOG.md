@@ -1,5 +1,72 @@
 # Changelog
 
+## 2026-10-14
+
+- **The runtime image is on `node:24-slim`.** Node 20 went end-of-life on
+  2026-04-30 and this pin was the last thing in the repo still on it. It was
+  only ever held below 21 because the Canadian arms branched on
+  `process.versions.node >= 21`, which made a bump a production transport
+  switch; #32 deleted the region, both arms and `src/tools/runtime.tools.ts`,
+  so nothing in the tree reads the running major and this is a version bump
+  (issue #44). 24 is an LTS line supported to 2028-04-30; not 26, which is
+  Current and does not become Active LTS until 2026-10-28, and not 22, which
+  has been in Maintenance since 2025-10-21. All dates off `nodejs/Release`'s
+  `schedule.json`, fetched 2026-10-14.
+- **`better-sqlite3`'s native addon was measured on the new major, not assumed.**
+  Its Node-API addon is rebuilt from source in the `deps` stage when no prebuild
+  matches, and that was the one named risk in #44. Proved with a
+  `--platform linux/arm64` build of this Dockerfile: the addon loads and a
+  SQLite round-trip (`CREATE TABLE` / `INSERT` / `SELECT`) runs inside the built
+  image. Both entry points also resolve their whole import graph in it and stop
+  at their own guards rather than at a module resolution error, which is what
+  exercises `got@9.6.0` and runtime `tsx`. It is a cross-build on an aarch64
+  Mac rather than a build on plexpi, so it establishes the toolchain and the
+  ABI and says nothing about on-box build time.
+- **CI's `test` matrix goes `[20, 24, 25]` to `[24, 26]`, and dropping 25 was
+  the correction review caught.** The first cut of this change kept 25 and
+  called it the forward-looking leg. **Node 25 reached end-of-life on
+  2026-06-01**, four months before node 20 did -- so the leg that was kept was
+  more end-of-life than the one that was dropped, and "drop the EOL leg" could
+  not stop at 20. 26 is the leg that can actually warn before the next bump: it
+  is the Current line and becomes Active LTS 2026-10-28. It was **measured
+  green before being added** -- 194/194 on v26.11.1 in a clean clone -- rather
+  than inferred from the fact that a leg exists, which is all
+  `node-matrix-gate.spec.ts` can check. That gate floors the matrix at two
+  distinct majors, so this is still a deliberate edit rather than a collapse to
+  a pinned version. Whether two legs is the right number at all is issue #31.
+  The 25 leg's original justification -- "plexpi runs 25" -- was already known
+  false and is not restated as one; the replacement justification was false
+  too, which is why `ci.yaml` now carries the schedule dates inline so the next
+  reader can re-derive rather than re-trust.
+- **The `lint`, `build` and `publish` jobs move 20 to 24 as well.** They carried
+  the literal with no justifying comment, and leaving them would have meant the
+  repo still linted, bundled and published on an EOL interpreter while the
+  Dockerfile said otherwise. They are also _not_ covered by
+  `node-matrix-gate.spec.ts`, which grades the `test` job only -- so a separate
+  ticket for them would have had no forcing function. `tsconfig.json` pins
+  `target: es6` / `lib: ["es2015"]`, so the publish runner's interpreter cannot
+  change the published artifact's syntax.
+- **What this means for library consumers is recorded rather than decided.**
+  This repo is also `bluelinky` on npm, and `package.json` declares no
+  `engines` field. Every justification above reasons from "the interpreter
+  production executes", which means plexpi -- but nobody consuming the library
+  runs plexpi, and CI's tested floor for them just moved from 20 to 24 with no
+  floor declared anywhere consumers can see. Adding `engines` is deliberately
+  NOT done here: the library targets es6, uses no node-24-only API, and very
+  likely still runs on 20, so a `>=24` declaration would overclaim. The
+  library-consumer dimension of the leg question belongs on issue #31.
+- **`devDependencies` still pins `@types/node: ^20.11.30`,** deliberately
+  unchanged -- a dependency bump has its own resolution and its own review.
+  Note this repo has no `.github/dependabot.yml`, so nothing will propose it
+  automatically; it is left for a dependency PR of its own rather than owned by
+  a bot.
+- **`deployment/README.md` is rewritten for the post-bump state.** The
+  "container provides Node.js 20" line in System Requirements is corrected, the
+  image size is re-measured (266 MB on node 20 to 291 MB on 24), and the
+  post-merge deploy step cross-references the existing "Updating the Code"
+  section rather than restating the command a sixth time -- that duplication is
+  how the node-20 line survived four other edits.
+
 ## 2026-10-13
 
 - **The Canadian region is deleted.** `CanadianController`, `CanadianVehicle`,

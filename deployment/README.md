@@ -423,21 +423,59 @@ never call. No release has been cut since, so nothing has shipped yet. If that
 matters more than the cross-repo coupling above, the fix is the `dist/` route the
 issue originally proposed, not a narrower dependency entry.
 
-**Node 20's pin is no longer load-bearing, and bumping it is now an ordinary
-maintenance change.** It was held below 21 because
-`src/controllers/canadian.controller.ts` and `src/vehicles/canadian.vehicle.ts`
-branched on `process.versions.node >= 21` -- `got` below, undici's `fetch` at or
-above -- so a bump was a production transport switch rather than a version bump.
-Issue #32 deleted the Canadian region and both arms with it. Nothing in the
-tree now reads the running major, so the only reason left to pin 20 is that it
-is what plexpi's container reports today (v20.20.2) and what CI's lower leg
-runs. Node 20 is past end-of-life (2026-04-30) and the pin should move; the
-remaining work is testing the bump against this box, not deciding a transport.
-`__tests__/node-matrix-gate.spec.ts` requires CI to carry a leg for whichever
-major `ARG NODE_IMAGE` resolves to, so a bump with no matching leg is red --
-but note the matrix already carries 24 and 25, so a bump to either of those
-passes that gate silently. It catches every major except the three already in
-the matrix.
+**The runtime image is on `node:24-slim`, and getting there was an ordinary
+maintenance change rather than a transport decision.** The pin was held below
+21 because `src/controllers/canadian.controller.ts` and
+`src/vehicles/canadian.vehicle.ts` branched on `process.versions.node >= 21` --
+`got` below, undici's `fetch` at or above -- so moving it switched a production
+transport. Issue #32 deleted the Canadian region and both arms with it, and
+nothing in the tree reads the running major now, which is what reduced the bump
+to a version change (issue #44). Node 20 went end-of-life on 2026-04-30; 24 is
+an LTS line supported to 2028-04-30, entering Maintenance 2026-10-20. Dates off
+`nodejs/Release`'s `schedule.json`, fetched 2026-10-14.
+
+**The one real risk was `better-sqlite3`, and it was measured rather than
+assumed.** Its Node-API addon is rebuilt from source in the `deps` stage when
+no prebuild matches the ABI, which on this box is minutes. The bump was proved
+with a `--platform linux/arm64` build of this Dockerfile before the PR opened:
+the addon resolves and a SQLite round-trip runs inside the built image. That is
+a cross-build on an aarch64 Mac rather than a build on plexpi itself, so it
+proves the toolchain and the ABI, not plexpi's build _time_ -- the on-box build
+is still the expensive part discussed above.
+
+**`__tests__/node-matrix-gate.spec.ts` keeps CI and this pin coupled.** It reads
+the major off `ARG NODE_IMAGE` and requires the `test` matrix to carry a leg for
+it, so a future bump with no matching leg goes red rather than shipping an
+untested interpreter. What it cannot catch is a bump to a major the matrix
+_already_ lists -- the matrix is `[24, 26]`, so moving the pin to 26 would pass
+silently. That is not a defect: a leg that exists really does run the suite on
+that interpreter, so there is no narrower mitigation available than reading the
+gate's own docblock before moving the pin. What the gate cannot tell you either
+way is whether the suite PASSES on the new major; that is the leg's job, which
+is why 26 was measured green (194/194 on v26.11.1) before it was added rather
+than inferred from the leg's existence.
+
+Applying the bump on the box is the ordinary code-update path -- see
+["Updating the Code"](#updating-the-code) below for the command and for why
+`--build` is required rather than optional. Nothing about this bump needs a
+different procedure; in particular `docker compose up -d` on its own reuses the
+existing image, so without `--build` the container keeps running node 20 while
+the Dockerfile says 24.
+
+The one step worth adding afterwards is reading the interpreter back, because
+that is the thing this change is about and no other step reports it:
+
+```bash
+docker exec bluelinky-fuel-monitor node -v
+```
+
+Expect `v24.x`. Then confirm a run actually writes a history row -- issue #44's
+last Done-when -- either by waiting for the top of the hour and reading
+`/var/log/fuel-monitor/cron.log`, or by forcing one with the **Manual test
+run** command under ["Quick Reference Commands"](#quick-reference-commands) --
+`monitor.ts`, with the `export` that section explains, because `docker exec`
+does not read `/etc/environment`. `status-json.ts` is the _reader_ and writes
+nothing, so it confirms the row only after `monitor.ts` has written one.
 
 ## Stopping the Monitor
 
@@ -584,15 +622,20 @@ docker exec bluelinky-fuel-monitor /bin/bash -c 'echo "{\"alert50Sent\":false,\"
 - Docker Engine 20.10+
 - The `docker compose` plugin (v2+); the hyphenated v1 binary is not used
 - ~1GB disk space for the image, its build cache and the state volume. The image
-  itself is 266 MB as of issue #25 (it was 1.22 GB before); BuildKit's cache is
+  itself is 291 MB as of issue #44 -- measured off a `--platform linux/arm64`
+  build on an aarch64 Mac, so it is the image's size and not plexpi's build
+  cost. It was 266 MB on node 20 (issue #25) and 1.22 GB before that, so the
+  node 24 base costs about 25 MB. BuildKit's cache is
   the part that grows, and `docker system df` on plexpi showed 32.6 GB of it on
   2026-10-11.
 - Internet connection for the Bluelink API and the configured alert backend
 
 **The container provides:**
 
-- Node.js 20 (pinned -- see "What the image contains" above; past end-of-life,
-  and since #32 nothing in the tree branches on the running major)
+- Node.js 24 (pinned -- see "What the image contains" above; LTS line,
+  supported to 2028-04-30, per `nodejs/Release`'s `schedule.json`). It was
+  node 20 until issue #44; nothing in the tree branches on the running major,
+  so the bump was a version change rather than a transport decision.
 - The runtime npm dependencies only: `better-sqlite3`, `got`, `push-receiver`,
   `tough-cookie`, `tsx`, `winston`. The lint, test and bundling toolchain is not
   in the image. `undici` was here until issue #32 deleted the Canadian region,

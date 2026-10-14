@@ -13,7 +13,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
       - run: npm ci
       - name: ESLint
         run: npm run lint
@@ -27,38 +27,44 @@ jobs:
         run: npx prettier --check './src/**/*.{js,jsx,ts,tsx}' './__tests__/**/*.{js,jsx,ts,tsx}' './*.ts'
   test:
     runs-on: ubuntu-latest
-    # 20 is the interpreter production executes: it is what `Dockerfile`'s
-    # `ARG NODE_IMAGE` pins, and the container on plexpi reports v20.20.2
-    # (measured 2026-10-13 via `docker exec bluelinky-fuel-monitor node -v`).
-    # That leg is pinned to the image by `__tests__/node-matrix-gate.spec.ts`,
-    # derived from the Dockerfile -- bump the base image without adding its
-    # major here and the suite goes red.
+    # Dates below are read off `nodejs/Release`'s `schedule.json`, fetched
+    # 2026-10-14, not off memory. That provenance is the point: the previous
+    # version of this comment justified a leg with "plexpi runs 25", which was
+    # false, and the replacement justified keeping 25 as "forward-looking",
+    # which was also false -- 25 reached end-of-life 2026-06-01. Cite the
+    # schedule so the next reader can re-derive instead of re-trusting.
     #
-    # 24 and 25 buy interpreter-level drift above it, and nothing narrower.
-    # #26 was a TLS regression WITHIN one transport arm, so drift is a failure
-    # this repo has actually had -- but see the correction below before reading
-    # that as a measured justification for these two specific majors.
+    #   v20  lts 2023-10-24  maint 2024-10-22  END 2026-04-30
+    #   v24  lts 2025-10-28  maint 2026-10-20  END 2028-04-30
+    #   v25  (no lts line)   maint 2026-04-01  END 2026-06-01
+    #   v26  lts 2026-10-28  maint 2027-10-20  END 2029-04-30
     #
-    # WHAT THIS NO LONGER BUYS, because it used to and the comment outlived it.
-    # These legs were added for the Canadian transport fork, which picked `got`
-    # below Node 21 and undici's `fetch` at or above, so the pair graded a
-    # production DEFAULT that was sensitive to the running major. Issue #32
-    # deleted that region. Nothing in the suite reads the running major now --
-    # the legs run byte-identical tests on three interpreters.
+    # 24 is the interpreter production executes: it is what `Dockerfile`'s
+    # `ARG NODE_IMAGE` pins as of issue #44, supported to 2028-04-30. That
+    # coupling is enforced by `__tests__/node-matrix-gate.spec.ts`, which reads
+    # the major off the Dockerfile rather than restating it here -- bump the
+    # base image without a matching leg and the suite goes red.
     #
-    # AND ONE FIGURE HERE WAS WRONG BEFORE #32 TOUCHED IT. The previous version
-    # of this comment justified the 25 leg with "plexpi runs 25". Measured
-    # 2026-10-13: plexpi has no host node at all -- not on the login-shell
-    # PATH, no `/usr/bin/node`, no nvm or fnm install, no `nodejs` package --
-    # and the only node on the box is v20.20.2 inside the container. 25 is this
-    # Mac's version, attributed to the wrong host. So the 25 leg has no
-    # measured justification, and never did. Whether three legs is still the
-    # right number is issue #31; this comment records what is known rather than
-    # deciding it.
+    # 26 is the second leg, and it is the only one that can warn BEFORE a bump:
+    # it is the Current line (since 2026-05-05) and becomes Active LTS
+    # 2026-10-28, so it is where this pin goes next. Measured green before it
+    # was added -- 194/194 on v26.11.1 in a clean clone -- rather than assumed
+    # from the fact that a leg exists. The gate can only check that a leg is
+    # PRESENT; whether the suite passes on it is the leg's own job.
+    #
+    # 20 AND 25 ARE BOTH GONE, and what they bought went before them. These
+    # legs were added for the Canadian transport fork, which picked `got` below
+    # node 21 and undici's `fetch` at or above, so a pair either side of 21
+    # graded a production DEFAULT that was sensitive to the running major.
+    # Issue #32 deleted that region; nothing in the suite reads the running
+    # major now, so the legs run byte-identical assertions and differ only in
+    # interpreter. Both of the dropped majors were past end-of-life, 25 by four
+    # months longer than 20 -- which is why "drop the EOL leg" could not stop
+    # at 20. Whether two legs is the right number at all is issue #31.
     strategy:
       fail-fast: false
       matrix:
-        node-version: [20, 24, 25]
+        node-version: [24, 26]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -72,6 +78,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
       - run: npm ci
       - run: npm run build
