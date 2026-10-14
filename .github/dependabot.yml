@@ -1,0 +1,123 @@
+# Dependabot *version* updates are configured exclusively by this file. Without
+# it GitHub runs security updates only, and those fire on advisories -- a major
+# bump of a types package is not an advisory. So before this file existed, the
+# set of dependency updates this repo could ever be offered was "those with a
+# CVE" (#48).
+#
+# The ecosystems below are derived from the manifests actually in the tree, and
+# `__tests__/dependabot-config.spec.ts` re-derives that mapping on every run, so
+# adding a manifest without an ecosystem here fails rather than drifts.
+version: 2
+updates:
+  # One grouped PR a week rather than one per package, matching inventoryapp and
+  # stockpile. Grouping is what makes a lockfile-bearing repo tractable: npm
+  # resolves peers across the whole tree, so sibling bumps that are individually
+  # fine can be jointly unsatisfiable, and a group PR resolves them together.
+  #
+  # One `ignore:` entry, and it is measured rather than defensive. The two npm
+  # configs in the fleet that carry ignores (inventoryapp's `typescript`,
+  # stockpile's Expo SDK set) each cite a dated breakage, and a speculative
+  # ignore is indistinguishable from coverage that silently is not there --
+  # which is the bug this whole file exists to close. So: nothing goes in this
+  # list that has not been made to fail. Anything else earns its ignore from
+  # the first red group PR, with the measurement pasted into the comment.
+  #
+  # `@types/node` is NOT ignored. It is at ^20 while the runtime image is being
+  # taken to node 24 (#44), so it should move, and a review of that bump is the
+  # point rather than the cost.
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    groups:
+      npm-deps:
+        patterns: ['*']
+    ignore:
+      # `got` majors, until the three controllers stop importing got@9 types.
+      #
+      # Measured, not reasoned: `got@11.8.6`'s own typings contain ZERO
+      # occurrences of `GotInstance` or `GotJSONFn` (grepped in
+      # `dist/source/*.d.ts` after `npm pack`), and got has shipped its own
+      # types since v10, so `@types/got@^9.4.4` stops applying at the same
+      # boundary. This repo uses both names --
+      # `australia.controller.ts:295,308`, `european.controller.ts:329,342`,
+      # `chinese.controller.ts:297,310` -- plus the namespace form
+      # `got.Response<T>` in the australia/european/chinese vehicles. Every one
+      # of those is a TS2614 or TS2503 under got>=11, which fails
+      # `npm run typecheck` -- a pre-commit hook AND the `lint` job.
+      #
+      # Separately, `got@16.1.0` declares `engines: {node: '>=22'}`, while the
+      # CI `test` matrix must keep a leg below node 21
+      # (`__tests__/node-matrix-gate.spec.ts`) and the runtime image is pinned
+      # below it too (`__tests__/docker-image.spec.ts`).
+      #
+      # This matters more under `patterns: ['*']` than it would ungrouped: one
+      # unsatisfiable member takes the whole weekly bundle red with it, and
+      # inventoryapp's config records what happens next -- "CI was red and the
+      # PR merged anyway; private repos on GitHub Free have no branch
+      # protection." Drop this entry when the got@9 type surface is gone.
+      - dependency-name: 'got'
+        update-types:
+          - 'version-update:semver-major'
+
+  # `actions/checkout@v4`, `actions/setup-node@v4` and
+  # `release-drafter/release-drafter@v5` are all floating major tags that
+  # nothing has ever moved.
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+
+  # For the one rev-pinned third-party hook repo in .pre-commit-config.yaml,
+  # `pre-commit/pre-commit-hooks` at v5.0.0. No Node ecosystem can see that
+  # file. The other three hooks are `repo: local` and run the versions npm
+  # already resolves, so the npm block above is their single pin. Drop this
+  # entry if that last pinned repo ever goes away -- the spec derives the
+  # requirement from the config rather than hardcoding it, so it will not
+  # object.
+  - package-ecosystem: 'pre-commit'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+
+  # NO `docker` ecosystem, and this is a measured omission rather than an
+  # oversight. Do not add one without first changing the Dockerfile; adding it
+  # as-is buys nothing and costs the appearance of coverage.
+  #
+  # There are TWO blockers, in series, and clearing the first alone would ship a
+  # docker ecosystem whose every PR is red.
+  #
+  # First, Dependabot cannot see this base at all. The Dockerfile pins it
+  # through `ARG NODE_IMAGE=node:20-slim` with both stages saying
+  # `FROM ${NODE_IMAGE}`, and Dependabot's docker updater matches the image
+  # reference on the `FROM` line textually without substituting build
+  # arguments, so an interpolated base resolves to no dependency:
+  # dependabot-core#2057 has been open since 2020-01-03 asking for exactly
+  # this, and the duplicate request #4597 was closed `not planned` in 2022.
+  # Every docker-ecosystem bump in this fleet -- sandy f9c9e16, heydover
+  # af25729, recordclub 5b23570 -- is against a literal `FROM`.
+  #
+  # Second, exactly as issue #48 said: `__tests__/node-matrix-gate.spec.ts`
+  # ("covers the major the runtime image pins") reads `ARG NODE_IMAGE` off the
+  # Dockerfile and asserts that major is a leg in CI's `test` matrix, today
+  # `[20, 24, 25]`. Dependabot bumps to latest, which is outside that set, so
+  # even with a literal `FROM` the first proposed bump is RED until the matrix
+  # moves with it. That is the gate working -- per #25, moving this base is a
+  # production interpreter change rather than a maintenance bump.
+  #
+  # Worth recording because it caught us: that coupling did not exist when this
+  # file was written. At `4a9fac3` the gate read only `ci.yaml`, and the
+  # Dockerfile major was pinned below 21 by `docker-image.spec.ts` instead,
+  # for the Canadian `got`/`fetch` transport split. PR #43 deleted the Canadian
+  # region and moved the coupling into the matrix gate, all within an hour of
+  # this branch being cut. The conclusion held through the move; the citation
+  # did not, which is the argument for the test below over a comment.
+  #
+  # `docker-compose.yml` is not a second target either: it declares `build:`,
+  # not `image:`, so there is no pinned reference in it to bump.
+  #
+  # The ARG is load-bearing besides (`docker-image.spec.ts` keeps every stage
+  # on one base, and two literal spellings would drift independently). If the
+  # Dockerfile ever does move to a literal base, the spec fails and demands
+  # this block -- at which point retiring or moving the `major < 21`
+  # assertion, behind #30/#32, is part of the same job.
