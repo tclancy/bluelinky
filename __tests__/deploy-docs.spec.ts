@@ -2,6 +2,8 @@ import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
+import { REGIONS } from '../src/constants';
+
 /**
  * Guards the deploy surface against the drift that issue #18 found: the docs
  * and the box had disagreed about where the checkout lives and which compose
@@ -274,6 +276,27 @@ function cronScheduleLines(body: string): string[] {
 }
 
 /** The `npx tsx <script>` targets named on the given crontab-shaped lines. */
+/**
+ * The region codes a `# Region (...)` comment advertises.
+ *
+ * Narrow on purpose: it reads the parenthesised list on a comment line whose
+ * text begins with `Region`, not every two-letter token in the file, so
+ * `BLUELINK_REGION=US` and prose elsewhere cannot feed it. Returns a Set in
+ * declaration order.
+ */
+function advertisedRegions(body: string): Set<string> {
+  const found: string[] = [];
+  for (const line of body.replace(/\r\n/g, '\n').split('\n')) {
+    const match = line.match(/^#\s*Region\s*\(([^)]*)\)/);
+    if (!match) continue;
+    for (const token of match[1].split(',')) {
+      const code = token.trim();
+      if (/^[A-Z]{2}$/.test(code)) found.push(code);
+    }
+  }
+  return new Set(found);
+}
+
 function cronScriptTargets(lines: string[]): Set<string> {
   const targets = new Set<string>();
   for (const line of lines) {
@@ -553,5 +576,42 @@ describe('deploy surface (issue #18)', () => {
     // business. Drift to an unscheduled script is still caught, because that
     // script is not in trackedTargets.
     expect([...documented].filter(target => !trackedTargets.has(target))).toEqual([]);
+  });
+  it('advertises only regions the library still dispatches', () => {
+    // Issue #32 deleted the `CA` region, and `.env.example`'s comment went on
+    // naming it for one commit. That file is the one `deployment/README.md`
+    // tells a human to copy, and `src/index.ts`'s switch THROWS on an unknown
+    // region -- so a stale name here is an uncaught
+    // `Your region is not supported yet.` out of the hourly cron job, not a
+    // cosmetic typo. Measured in the built image before this guard existed:
+    // `BLUELINK_REGION=CA npx tsx monitor.ts` exits on an unhandled throw.
+    //
+    // Derived from `REGIONS` rather than listed, so deleting or adding a region
+    // moves what this demands of the prose. Subset rather than equality: the
+    // example is not obliged to enumerate every region, only to name no region
+    // that does not exist.
+    const advertised = advertisedRegions(read('.env.example'));
+    const dispatched = new Set<string>(Object.values(REGIONS));
+
+    // Reachability on both sides. An empty `advertised` is a subset of
+    // anything, which is exactly how this assertion would pass while the
+    // comment it grades had been reworded out of the extractor's reach.
+    expect(advertised.size).toBeGreaterThan(0);
+    expect(dispatched.size).toBeGreaterThan(0);
+
+    expect([...advertised].filter(region => !dispatched.has(region))).toEqual([]);
+
+    // Controls for the extractor, per shape it must handle.
+    expect([...advertisedRegions('# Region (US, EU)')]).toEqual(['US', 'EU']);
+    expect([...advertisedRegions('# Region (US, CA, EU, AU, CN)')]).toEqual([
+      'US',
+      'CA',
+      'EU',
+      'AU',
+      'CN',
+    ]);
+    // Negative: a line that is not the region comment contributes nothing.
+    expect([...advertisedRegions('# Vehicle brand (hyundai or kia)')]).toEqual([]);
+    expect([...advertisedRegions('BLUELINK_REGION=US')]).toEqual([]);
   });
 });

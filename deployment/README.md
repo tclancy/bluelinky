@@ -423,14 +423,21 @@ never call. No release has been cut since, so nothing has shipped yet. If that
 matters more than the cross-repo coupling above, the fix is the `dist/` route the
 issue originally proposed, not a narrower dependency entry.
 
-**Node 20 is pinned deliberately, and bumping it is a behaviour change.**
+**Node 20's pin is no longer load-bearing, and bumping it is now an ordinary
+maintenance change.** It was held below 21 because
 `src/controllers/canadian.controller.ts` and `src/vehicles/canadian.vehicle.ts`
-both branch on `process.versions.node >= 21`: below it the Canadian region uses
-`got`, at or above it undici's `fetch`. plexpi's container reports v20.20.2, so
-production runs the `got` arm today -- the same arm CI pins. Node 20 is past
-end-of-life (2026-04-30) and the pin should move, but that is a production
-transport switch and issue #32 documents four behavioural divergences between
-the two arms. It wants its own change, behind #30 and #32.
+branched on `process.versions.node >= 21` -- `got` below, undici's `fetch` at or
+above -- so a bump was a production transport switch rather than a version bump.
+Issue #32 deleted the Canadian region and both arms with it. Nothing in the
+tree now reads the running major, so the only reason left to pin 20 is that it
+is what plexpi's container reports today (v20.20.2) and what CI's lower leg
+runs. Node 20 is past end-of-life (2026-04-30) and the pin should move; the
+remaining work is testing the bump against this box, not deciding a transport.
+`__tests__/node-matrix-gate.spec.ts` requires CI to carry a leg for whichever
+major `ARG NODE_IMAGE` resolves to, so a bump with no matching leg is red --
+but note the matrix already carries 24 and 25, so a bump to either of those
+passes that gate silently. It catches every major except the three already in
+the matrix.
 
 ## Stopping the Monitor
 
@@ -584,11 +591,12 @@ docker exec bluelinky-fuel-monitor /bin/bash -c 'echo "{\"alert50Sent\":false,\"
 
 **The container provides:**
 
-- Node.js 20 (pinned -- see "What the image contains" above; this is the version
-  that selects the Canadian `got` transport)
+- Node.js 20 (pinned -- see "What the image contains" above; past end-of-life,
+  and since #32 nothing in the tree branches on the running major)
 - The runtime npm dependencies only: `better-sqlite3`, `got`, `push-receiver`,
-  `tough-cookie`, `tsx`, `undici`, `winston`. The lint, test and bundling
-  toolchain is not in the image.
+  `tough-cookie`, `tsx`, `winston`. The lint, test and bundling toolchain is not
+  in the image. `undici` was here until issue #32 deleted the Canadian region,
+  which was the only thing importing it.
 - cron daemon
 - All TypeScript files
 - Isolated filesystem

@@ -1,5 +1,76 @@
 # Changelog
 
+## 2026-10-13
+
+- **The Canadian region is deleted.** `CanadianController`, `CanadianVehicle`,
+  `src/constants/canada.ts` and `src/tools/runtime.tools.ts` are gone, along
+  with the `CA` arm of `src/index.ts`'s dispatch switch, `REGIONS.CA`, the `CA`
+  member of the `REGION` union, `ALL_ENDPOINTS.CA`, the `CA` entry in
+  `src/util.ts`'s temp-code ranges and `debug.ts`'s `CA` choice. Nothing
+  selected it: all three entry points read `process.env.BLUELINK_REGION || 'US'`
+  and every deploy doc sets `US`, so the only thing exercising these paths was
+  the test suite -- which is also why the four divergences #32 catalogued, one
+  of them reporting a failed lock as successful, were never reachable in
+  production (issue #32).
+- **`undici` is no longer a runtime dependency.** The Canadian controller, the
+  Canadian vehicle and `runtime.tools.ts` were its only importers in the shipped
+  tree; `got` is unaffected and still used by every remaining region. The
+  runtime dependency list goes seven packages to six. Verified by building the
+  image and running both entry points inside it: `monitor.ts` resolves its whole
+  import graph and stops at "Missing required environment variables",
+  `status-json.ts` at an unmounted state volume -- neither at a module
+  resolution error.
+- **The CI node matrix keeps its three legs and loses its reason.** The legs
+  were added either side of major 21 because that is where the Canadian arm
+  switched between `got` and undici's `fetch`, so they graded a production
+  default that was sensitive to the running major. With the region gone
+  **nothing in the suite reads the running major** and the legs run byte-identical assertions on three
+  interpreters. `__tests__/node-matrix-gate.spec.ts` is re-pointed at the
+  coupling that survives -- CI must carry a leg for whichever major
+  `Dockerfile`'s `ARG NODE_IMAGE` resolves to -- and says so in its own
+  docblock rather than keeping the retired claim. Whether three legs is still
+  the right number is issue #31.
+- **The `node:20` pin is no longer load-bearing.** `docker-image.spec.ts`
+  asserted the base-image major was below 21, because bumping it would have
+  switched the Canadian transport in production. That assertion is removed: it
+  now constrains nothing real, and node 20 has been past end-of-life since
+  2026-04-30. Bumping the image is now an ordinary maintenance change that needs
+  testing against plexpi, not a transport decision. `deployment/README.md` is
+  corrected to say so.
+- **The repo-wide ban on `NODE_TLS_REJECT_UNAUTHORIZED` survives the deletion**,
+  as `__tests__/tls-global-scope.spec.ts`. It was the third `describe` block of
+  the deleted `canadian-tls-scope.spec.ts` and was never Canada-specific: it
+  walks `src/`, `scripts/` and every root source file -- including
+  `jest.config.cjs`, which executes inside the test process -- and bans the
+  identifier outright. #32's own analysis named this the one item that holds
+  "under every option, including deletion", because "'unreachable' is a weaker
+  guarantee than 'absent'". Its two Canada reachability assertions are replaced
+  with surviving request paths and its scan floor is re-measured 52 -> 49.
+- **`.env.example` no longer advertises `CA` as a legal region**, and
+  `__tests__/deploy-docs.spec.ts` now gates that prose against `REGIONS`. The
+  comment above `BLUELINK_REGION=US` still listed `CA` after the region was
+  deleted, and `src/index.ts` THROWS on an unknown region -- measured in the
+  built image, `BLUELINK_REGION=CA npx tsx monitor.ts` dies on an unhandled
+  `Your region is not supported yet.` So a stale name in the file
+  `deployment/README.md` tells a human to copy is a broken cron job, not a
+  typo. The same `CA` example is dropped from the bug-report issue template,
+  and the dead `test-ca` npm script -- an upstream leftover pointing at a
+  `test-ca.js` that is not in the tree -- is removed.
+- **Correction, measured rather than inherited: `ci.yaml` justified its node 25
+  leg with "plexpi runs 25", and plexpi has no host node at all.** Not on the
+  login-shell PATH, no `/usr/bin/node`, no nvm or fnm install, no `nodejs`
+  package; the only node on the box is **v20.20.2 inside the container**. 25 is
+  this Mac's version, attributed to the wrong host. The 25 leg therefore has no
+  measured justification and never did -- which is input to issue #31 rather
+  than a reason to drop it here. The comment now records the measurement.
+- **`MEASURED_IMAGE_FILES` re-measured: 46 files**, from a real
+  `docker build --platform linux/arm64` on docker 29.8.2 / buildx 0.37.2, down
+  from 50 by exactly the four deleted source files. Regenerated from the build rather than
+  edited, which is what that constant is for. Counting from its first
+  measurement on 2026-10-11, this is the second time an unrelated change to
+  `src/` has moved it -- PR #30 added the 50th file, this removes four -- and
+  the open design question is issue #42.
+
 ## 2026-10-12
 
 - **The Canadian arm no longer disables TLS certificate verification

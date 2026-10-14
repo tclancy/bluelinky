@@ -13,7 +13,7 @@ A clear and concise description of what the bug is and how to reproduce it.
 
 - OS: [e.g. macOS, Windows, Linux]
 - Bluelinky Version [e.g. v5.2.3]
-- Region: [e.g. US, CA, EU]
+- Region: [e.g. US, EU]
 - Brand: [kia, hyundai]
 
 **Additional context**

@@ -50,20 +50,30 @@ const BUILD_TOOLCHAIN = ['python3', 'make', 'g++', 'gcc'];
 /**
  * `find . -type f` from `/app` in the image this branch builds, excluding
  * `node_modules/` and `state/` (the two trees the Dockerfile creates rather
- * than copies). **Re-measured 2026-10-13** on `docker build --platform
- * linux/arm64`, docker 29.8.2 / buildx 0.37.2 (read off `docker version`, not
- * copied -- see below), against the .dockerignore in this commit: 50 files.
- * First measured 2026-10-11 at 49.
+ * than copies). **Re-measured 2026-10-13** on `docker build
+ * --platform linux/arm64`, docker 29.8.2 / buildx 0.37.2 (read off `docker
+ * version`, not copied -- see below), against the .dockerignore in this
+ * commit: 46 files. 50 before this change; 49 on 2026-10-11.
  *
- * WHY IT MOVED, because the next reader will meet this again (issue #40). The
- * one added entry is `src/tools/runtime.tools.ts`, which PR #30 created. This
- * pin is per-FILE and `.dockerignore` re-admits `src/` WHOLESALE via `!src`, so
- * every new file under `src/` ships and every new file under `src/` makes this
- * pin stale. PR #33 merged its 49-file pin at 11:18Z and PR #30 added the 50th
- * file at 11:24Z (both merge times; the 49 was measured 2026-10-11, as above).
- * Each was green on its own branch and `main` was red from the second merge
- * onward, in either order. No `merge-tree` conflict sweep can see that coming,
- * because the two changes never touch the same line.
+ * The figures in the suite docblock at the top of this file are NOT updated by
+ * this change and must not be: they are a dated record of the live plexpi image
+ * on 2026-10-11, including "the runtime dependency list is seven packages",
+ * which was true then. It is six now -- #32 removed `undici` -- and the
+ * present-tense figure belongs in `deployment/README.md`, which carries it.
+ *
+ * WHY IT MOVED, because the next reader will meet this again (issues #40, #42).
+ * Issue #32 deleted the Canadian region, and four of the 50 entries were its
+ * files: `src/constants/canada.ts`, `src/controllers/canadian.controller.ts`,
+ * `src/vehicles/canadian.vehicle.ts` and `src/tools/runtime.tools.ts`. The
+ * previous move was the opposite direction -- PR #30 ADDED the last of those.
+ *
+ * This pin is per-FILE and `.dockerignore` re-admits `src/` WHOLESALE via
+ * `!src`, so every added, deleted or renamed file under `src/` makes it stale,
+ * and `main` goes red on whichever of two independently-green PRs lands second.
+ * That is what happened on 2026-10-13 (PR #33's 49-file pin at 11:18Z, PR #30's
+ * new file at 11:24Z) and no `merge-tree` conflict sweep can see it coming,
+ * because the two changes never touch the same line. Issue #42 is the open
+ * design question; this commit is another instance of the cost, not a fix.
  *
  * The engine version above is read off `docker version` deliberately. The first
  * draft of this docblock said "docker 29.4", third-hand from the Dockerfile's
@@ -112,7 +122,6 @@ const MEASURED_IMAGE_FILES = [
   'src/constants/america.ts',
   'src/constants/australia.cfb.ts',
   'src/constants/australia.ts',
-  'src/constants/canada.ts',
   'src/constants/china.ts',
   'src/constants/europe.cfb.ts',
   'src/constants/europe.ts',
@@ -126,7 +135,6 @@ const MEASURED_IMAGE_FILES = [
   'src/controllers/authStrategies/chinese.legacyAuth.strategy.ts',
   'src/controllers/authStrategies/european.brandAuth.strategy.ts',
   'src/controllers/authStrategies/european.legacyAuth.strategy.ts',
-  'src/controllers/canadian.controller.ts',
   'src/controllers/chinese.controller.ts',
   'src/controllers/controller.ts',
   'src/controllers/european.controller.ts',
@@ -139,12 +147,10 @@ const MEASURED_IMAGE_FILES = [
   'src/monitor-helpers.ts',
   'src/status-json.ts',
   'src/tools/common.tools.ts',
-  'src/tools/runtime.tools.ts',
   'src/util.ts',
   'src/vehicle-db.ts',
   'src/vehicles/american.vehicle.ts',
   'src/vehicles/australia.vehicle.ts',
-  'src/vehicles/canadian.vehicle.ts',
   'src/vehicles/chinese.vehicle.ts',
   'src/vehicles/european.vehicle.ts',
   'src/vehicles/vehicle.ts',
@@ -371,8 +377,9 @@ describe('runtime image content (issue #25)', () => {
     expect(stages.length).toBeGreaterThanOrEqual(2);
 
     // One base image across every stage. Two literal `node:NN-slim` spellings
-    // drift independently, and the runtime one is the one that decides which
-    // transport arm the Canadian region selects (see the node-version test).
+    // drift independently, and the runtime one is the interpreter plexpi
+    // executes -- `__tests__/node-matrix-gate.spec.ts` requires CI to carry a
+    // leg for whichever major it resolves to.
     //
     // Under the `ARG NODE_IMAGE=` form this equality is trivially true, so it
     // is NOT the whole assertion: the concreteness check beside it is what
@@ -594,7 +601,7 @@ describe('runtime image content (issue #25)', () => {
       'alert-backends.ts',
       'src/index.ts',
       'src/vehicle-db.ts',
-      'src/controllers/canadian.controller.ts',
+      'src/controllers/american.controller.ts',
       'deployment/crontab',
       'deployment/entrypoint.sh',
     ]) {
@@ -673,23 +680,6 @@ describe('runtime image content (issue #25)', () => {
     // against a correspondingly empty or complete pin.
     expect(predicted.length).toBeGreaterThan(40);
     expect(files.length).toBeGreaterThan(predicted.length);
-  });
-
-  it('pins the node major that selects the Canadian got transport', () => {
-    // Not style. `canadian.controller.ts` and `canadian.vehicle.ts` both branch
-    // on `process.versions.node >= 21`: below it the region uses `got`, at or
-    // above it undici's `fetch`. plexpi's container reports v20.20.2 -- measured
-    // 2026-10-11 -- so production runs the `got` arm today, which is also the
-    // arm CI pins.
-    //
-    // Bumping this base image is therefore a production transport switch, not a
-    // maintenance bump, and issue #32 documents four behavioural divergences
-    // between the arms (one reporting a failed lock as successful). Node 20 is
-    // past end-of-life and this pin should move -- behind #30 and #32, with the
-    // switch as the headline rather than as a rider. See issue #25.
-    const major = Number(stages[0].from.match(/node:(\d+)/)?.[1]);
-    expect(Number.isInteger(major)).toBe(true);
-    expect(major).toBeLessThan(21);
   });
 
   it('evaluates .dockerignore the way the ordering rules require', () => {

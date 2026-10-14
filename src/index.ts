@@ -1,6 +1,5 @@
 import { AmericanBlueLinkyConfig, AmericanController } from './controllers/american.controller';
 import { EuropeanController, EuropeBlueLinkyConfig } from './controllers/european.controller';
-import { CanadianBlueLinkyConfig, CanadianController } from './controllers/canadian.controller';
 import { ChineseBlueLinkConfig, ChineseController } from './controllers/chinese.controller';
 import { EventEmitter } from 'events';
 import logger from './logger';
@@ -8,7 +7,6 @@ import { Session } from './interfaces/common.interfaces';
 import { REGIONS } from './constants';
 import AmericanVehicle from './vehicles/american.vehicle';
 import EuropeanVehicle from './vehicles/european.vehicle';
-import CanadianVehicle from './vehicles/canadian.vehicle';
 import ChineseVehicle from './vehicles/chinese.vehicle';
 import { SessionController } from './controllers/controller';
 import { Vehicle } from './vehicles/vehicle';
@@ -17,7 +15,6 @@ import AustraliaVehicle from './vehicles/australia.vehicle';
 
 type BluelinkyConfigRegions =
   | AmericanBlueLinkyConfig
-  | CanadianBlueLinkyConfig
   | EuropeBlueLinkyConfig
   | ChineseBlueLinkConfig
   | AustraliaBlueLinkyConfig;
@@ -38,8 +35,6 @@ export class BlueLinky<
   REGION = T['region'],
   VEHICLE_TYPE extends Vehicle = REGION extends REGIONS.US
     ? AmericanVehicle
-    : REGION extends REGIONS.CA
-    ? CanadianVehicle
     : REGION extends REGIONS.CN
     ? ChineseVehicle
     : REGION extends REGIONS.AU
@@ -66,9 +61,6 @@ export class BlueLinky<
         break;
       case REGIONS.US:
         this.controller = new AmericanController(this.config as AmericanBlueLinkyConfig);
-        break;
-      case REGIONS.CA:
-        this.controller = new CanadianController(this.config as CanadianBlueLinkyConfig);
         break;
       case REGIONS.CN:
         this.controller = new ChineseController(this.config as ChineseBlueLinkConfig);

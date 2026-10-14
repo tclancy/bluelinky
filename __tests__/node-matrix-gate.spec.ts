@@ -1,35 +1,32 @@
 import fs from 'fs';
 import path from 'path';
 
-import { CanadianController } from '../src/controllers/canadian.controller';
-import {
-  FETCH_TRANSPORT_MIN_NODE_MAJOR,
-  shouldUseFetchTransport,
-} from '../src/tools/runtime.tools';
-
 /**
- * Pins the CI `test` job to running an interpreter each side of the Canadian
- * transport threshold, and pins the one assertion that makes that worth doing.
+ * Pins the CI `test` job to running the suite on the interpreter the runtime
+ * image pins, and pins the structural keys that can retire a leg while the
+ * matrix list still reads intact.
  *
- * `shouldUseFetchTransport` picks between `got` (below Node 21) and undici's
- * `fetch` (at or above) off the running major. Two things follow, and keeping
- * them apart is what stops this file overclaiming:
+ * **This file's original thesis is gone, deliberately.** It was written for the
+ * Canadian transport fork: `shouldUseFetchTransport` picked between `got`
+ * (below Node 21) and undici's `fetch` (at or above) off the running major, so
+ * two legs either side of 21 bought the only check that the DEFAULT selection
+ * was right above the threshold. Issue #32 deleted the Canadian region, which
+ * deleted `src/tools/runtime.tools.ts`, the threshold constant and both arms.
+ * Three of this file's assertions went with them.
  *
- *   - It does NOT buy arm coverage. #30's injectable `useFetchTransport` means
- *     both arms already execute on any single interpreter, because the arm
- *     suites set the flag explicitly.
- *   - It DOES buy the only check that the *default* selection is correct above
- *     the threshold. Before the matrix, CI ran node 20 alone, so a default
- *     hard-wired to `false` -- which switches off the arm the deployment box
- *     actually runs -- was green.
+ * What is left, stated narrowly so this file cannot overclaim again:
  *
- * Measured 2026-10-12, hard-wiring the field past the function:
- *
- *   `useFetchTransport = true`   -> node 20 RED,   node 24 green
- *   `useFetchTransport = false`  -> node 20 green, node 24 RED
- *
- * The threshold is imported from production rather than restated here, so
- * moving `FETCH_TRANSPORT_MIN_NODE_MAJOR` moves what this file demands of CI.
+ *   - It DOES buy the coupling below -- CI runs the suite on the major
+ *     `Dockerfile`'s `NODE_IMAGE` pins, so a base-image bump that nothing tests
+ *     is red rather than green. That is derived from the Dockerfile, not
+ *     restated here, so moving the pin moves what this file demands of CI.
+ *   - It does NOT buy arm coverage any more, because there are no arms. After
+ *     #32 **nothing in this suite is version-sensitive**: the legs run
+ *     byte-identical assertions and differ only in interpreter. That is worth
+ *     something (interpreter-level drift is the failure this repo has actually
+ *     had -- #26 was a TLS regression within one arm) but it is strictly less
+ *     than it was, and it is the open question on issue #31. This docblock is
+ *     the honest record of that, not an argument for the current leg count.
  *
  * Deliberate boundary: this file grades the `test` job, not the workflow's
  * trigger. Rewriting `on:` to `workflow_dispatch` only would leave every
@@ -39,6 +36,24 @@ import {
 
 const ROOT = path.join(__dirname, '..');
 const WORKFLOW = path.join(ROOT, '.github', 'workflows', 'ci.yaml');
+const DOCKERFILE = path.join(ROOT, 'Dockerfile');
+
+/**
+ * The major in the runtime image's pinned base, read off `ARG NODE_IMAGE=`.
+ *
+ * Read from the Dockerfile rather than restated, so this gate follows the pin
+ * instead of having to be edited in lockstep with it -- which is the failure
+ * mode a hardcoded `20` here would have. Throws rather than returning a
+ * sentinel, because a silent `NaN` satisfies nothing and reports nothing.
+ */
+function runtimeImageMajor(): number {
+  const source = fs.readFileSync(DOCKERFILE, 'utf8').replace(/\r\n/g, '\n');
+  const match = source.match(/^ARG NODE_IMAGE=node:(\d+)-slim$/m);
+  if (!match) {
+    throw new Error(`no \`ARG NODE_IMAGE=node:NN-slim\` found in ${DOCKERFILE}`);
+  }
+  return Number(match[1]);
+}
 
 /** The workflow source, line endings normalised so a CRLF checkout still parses. */
 function workflowSource(): string {
@@ -118,56 +133,38 @@ describe('the CI node-version matrix', () => {
     expect(matrixMajors().length).toBeGreaterThanOrEqual(2);
   });
 
-  it('spans the transport threshold: at least one major each side of it', () => {
-    const majors = matrixMajors();
-
-    // The property, not the literal versions. `[20, 24]` satisfies it today,
-    // but so would `[18, 22]`; `[22, 24]` would not, and that is the point --
-    // bumping the lower leg past the threshold silently retires the `got` arm
-    // from CI, which is the exact regression this file exists to catch.
-    expect(
-      majors.filter(major => major < FETCH_TRANSPORT_MIN_NODE_MAJOR).length
-    ).toBeGreaterThanOrEqual(1);
-    expect(
-      majors.filter(major => major >= FETCH_TRANSPORT_MIN_NODE_MAJOR).length
-    ).toBeGreaterThanOrEqual(1);
-  });
-
-  it('the matrix majors really do select different transports', () => {
-    // Closes the gap between "two numbers either side of a constant" and "two
-    // interpreters that make production branch differently". This reads the
-    // decision through the production function rather than re-deriving the
-    // comparison, so a change to how the version string is parsed -- not just
-    // to the constant -- is covered too.
-    const selections = new Set(
-      matrixMajors().map(major => shouldUseFetchTransport(`${major}.0.0`))
-    );
-    expect(selections).toEqual(new Set([false, true]));
-  });
-
-  it('the leg this test is running on grades the default, not merely the function', () => {
-    // The assertion that makes the matrix falsifiable at all. Without a
-    // version-sensitive expectation SOMEWHERE in the suite, the legs are a
-    // duplicate run of byte-identical assertions and every structural check
-    // above still passes. `canadian-transport.spec.ts` carries this too; the
-    // duplication is deliberate, because it must not be able to disappear
-    // from under the file whose docblock explains why the legs exist.
+  it('covers the major the runtime image pins', () => {
+    // The coupling that survived #32, and the only assertion here that can go
+    // red from a change made OUTSIDE this file. plexpi runs whatever
+    // `ARG NODE_IMAGE` resolves to, so a base-image bump with no matching leg
+    // means the interpreter production executes is untested -- green CI over an
+    // untried runtime. Both sides are derived (Dockerfile, workflow), so this
+    // tracks the pin rather than needing an edit in lockstep with it.
     //
-    // Derived from `process.version` -- a different API than the production
-    // default reads -- so a hardcoded default cannot satisfy it.
-    const runningMajor = Number(process.version.replace(/^v/, '').split('.')[0]);
-    const controller = new CanadianController({
-      username: 'testuser@gmail.com',
-      password: 'test',
-      region: 'CA',
-      autoLogin: false,
-      brand: 'hyundai',
-      pin: '1234',
-      vin: '4444444444444',
-      vehicleId: undefined,
-    } as never);
+    // The property is containment, not a literal: `node:24-slim` with a
+    // `[20, 24, 25]` matrix passes; `node:22-slim` with the same matrix fails.
+    //
+    // Which bounds what this catches, stated rather than implied: the uncaught
+    // set is exactly the majors already in the matrix. A bump from 20 to 24 or
+    // 25 is green here, because CI really would be running that interpreter.
+    // What it cannot grade is whether the suite PASSES on the new major -- that
+    // is the leg itself doing its job, and it is why this is a containment
+    // check and not the whole of the gate.
+    expect(matrixMajors()).toContain(runtimeImageMajor());
+  });
 
-    expect(controller.useFetchTransport).toBe(runningMajor >= FETCH_TRANSPORT_MIN_NODE_MAJOR);
+  it('runs more than one interpreter', () => {
+    // Weaker than the threshold assertion this replaces, and the weakening is
+    // the point rather than an oversight. Before #32 the legs graded a
+    // version-sensitive production default; nothing in the suite is
+    // version-sensitive now, so what a second leg buys is interpreter-level
+    // drift (#26's TLS regression was within one arm, not between arms) and
+    // nothing stronger.
+    //
+    // Kept as a floor rather than deleted because a one-leg matrix is just a
+    // pinned version wearing matrix syntax, and collapsing to one is a decision
+    // -- issue #31 -- not a tidy-up. This makes it a visible edit here.
+    expect(new Set(matrixMajors()).size).toBeGreaterThanOrEqual(2);
   });
 
   it('the job consumes the matrix rather than pinning a literal version', () => {

@@ -1,5 +1,5 @@
 /* eslint-disable */
-// TODO: add all calls from EU and CA
+// TODO: add all calls from EU
 
 import config from './config.json';
 import BlueLinky from './src';
@@ -45,7 +45,7 @@ const askForRegionInput = () => {
         type: 'list',
         name: 'region',
         message: 'What Region are you in?',
-        choices: ['CN', 'US', 'EU', 'CA', 'AU'],
+        choices: ['CN', 'US', 'EU', 'AU'],
       },
       {
         type: 'list',
