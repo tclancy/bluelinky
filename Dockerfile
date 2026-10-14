@@ -23,7 +23,22 @@
 # that outright -- `tsx` is still resolved at runtime, just from `dependencies`
 # now. See the note on the COPY below for why that trade was taken.
 
-ARG NODE_IMAGE=node:20-slim
+# The runtime interpreter. 24 is the active even-numbered LTS line; node 20
+# went end-of-life 2026-04-30 and this pin was the last thing in the repo still
+# on it (issue #44).
+#
+# It was held below 21 until #32, because `canadian.controller.ts` and
+# `canadian.vehicle.ts` branched on `process.versions.node >= 21` -- `got`
+# below, undici's `fetch` at or above -- so moving it switched a production
+# transport. #32 deleted the region, both arms and `src/tools/runtime.tools.ts`;
+# nothing in the tree reads the running major now, which is what made this an
+# ordinary version bump rather than a transport decision.
+#
+# `__tests__/node-matrix-gate.spec.ts` reads this line and requires CI's `test`
+# matrix to carry a leg for whichever major it resolves to, so the two cannot
+# drift. Keep the `node:NN-slim` spelling -- that gate's regex is anchored on it
+# and throws rather than guessing if the shape changes.
+ARG NODE_IMAGE=node:24-slim
 
 # ---------------------------------------------------------------------------
 # deps -- resolve and compile the RUNTIME dependency tree, then be discarded.

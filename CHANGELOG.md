@@ -1,5 +1,41 @@
 # Changelog
 
+## 2026-10-14
+
+- **The runtime image is on `node:24-slim`.** Node 20 went end-of-life on
+  2026-04-30 and this pin was the last thing in the repo still on it. It was
+  only ever held below 21 because the Canadian arms branched on
+  `process.versions.node >= 21`, which made a bump a production transport
+  switch; #32 deleted the region, both arms and `src/tools/runtime.tools.ts`,
+  so nothing in the tree reads the running major and this is a version bump
+  (issue #44). 24 is the active even-numbered LTS line.
+- **`better-sqlite3`'s native addon was measured on the new major, not assumed.**
+  Its Node-API addon is rebuilt from source in the `deps` stage when no prebuild
+  matches, and that was the one named risk in #44. Proved with a
+  `--platform linux/arm64` build of this Dockerfile: the addon loads and a
+  SQLite round-trip (`CREATE TABLE` / `INSERT` / `SELECT`) runs inside the built
+  image. That is a cross-build on an aarch64 Mac rather than a build on plexpi,
+  so it establishes the toolchain and the ABI and says nothing about on-box
+  build time.
+- **CI drops its node 20 leg: the `test` matrix goes `[20, 24, 25]` to
+  `[24, 25]`.** With the image on 24 the lower leg graded an end-of-life
+  interpreter that nothing here runs. The remaining pair is the runtime major
+  plus one above it, which is the only direction a leg can warn _before_ a
+  bump; `node-matrix-gate.spec.ts` floors the matrix at two, so this is still a
+  deliberate edit rather than a collapse to a pinned version. Whether two legs
+  is the right number at all is still issue #31. The 25 leg's original
+  justification -- "plexpi runs 25" -- remains false and is not restated as one.
+- **The `lint`, `build` and `publish` jobs move 20 to 24 as well.** They carried
+  the literal with no justifying comment, and leaving them would have meant the
+  repo still linted, bundled and published on an EOL interpreter while the
+  Dockerfile said otherwise. `devDependencies` still pins `@types/node: ^20`,
+  which is deliberately NOT changed here -- that is a dependency bump, with its
+  own resolution and its own review, and Dependabot owns it.
+- **`deployment/README.md` is rewritten for the post-bump state**, including the
+  literal `docker compose up -d --build` the box needs and why `--build` is
+  load-bearing: without it compose reuses the existing image and the container
+  keeps running node 20 while the Dockerfile says 24.
+
 ## 2026-10-13
 
 - **The Canadian region is deleted.** `CanadianController`, `CanadianVehicle`,

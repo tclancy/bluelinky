@@ -423,21 +423,48 @@ never call. No release has been cut since, so nothing has shipped yet. If that
 matters more than the cross-repo coupling above, the fix is the `dist/` route the
 issue originally proposed, not a narrower dependency entry.
 
-**Node 20's pin is no longer load-bearing, and bumping it is now an ordinary
-maintenance change.** It was held below 21 because
-`src/controllers/canadian.controller.ts` and `src/vehicles/canadian.vehicle.ts`
-branched on `process.versions.node >= 21` -- `got` below, undici's `fetch` at or
-above -- so a bump was a production transport switch rather than a version bump.
-Issue #32 deleted the Canadian region and both arms with it. Nothing in the
-tree now reads the running major, so the only reason left to pin 20 is that it
-is what plexpi's container reports today (v20.20.2) and what CI's lower leg
-runs. Node 20 is past end-of-life (2026-04-30) and the pin should move; the
-remaining work is testing the bump against this box, not deciding a transport.
-`__tests__/node-matrix-gate.spec.ts` requires CI to carry a leg for whichever
-major `ARG NODE_IMAGE` resolves to, so a bump with no matching leg is red --
-but note the matrix already carries 24 and 25, so a bump to either of those
-passes that gate silently. It catches every major except the three already in
-the matrix.
+**The runtime image is on `node:24-slim`, and getting there was an ordinary
+maintenance change rather than a transport decision.** The pin was held below
+21 because `src/controllers/canadian.controller.ts` and
+`src/vehicles/canadian.vehicle.ts` branched on `process.versions.node >= 21` --
+`got` below, undici's `fetch` at or above -- so moving it switched a production
+transport. Issue #32 deleted the Canadian region and both arms with it, and
+nothing in the tree reads the running major now, which is what reduced the bump
+to a version change (issue #44). Node 20 went end-of-life on 2026-04-30; 24 is
+the active even-numbered LTS line.
+
+**The one real risk was `better-sqlite3`, and it was measured rather than
+assumed.** Its Node-API addon is rebuilt from source in the `deps` stage when
+no prebuild matches the ABI, which on this box is minutes. The bump was proved
+with a `--platform linux/arm64` build of this Dockerfile before the PR opened:
+the addon resolves and a SQLite round-trip runs inside the built image. That is
+a cross-build on an aarch64 Mac rather than a build on plexpi itself, so it
+proves the toolchain and the ABI, not plexpi's build _time_ -- the on-box build
+is still the expensive part discussed above.
+
+**`__tests__/node-matrix-gate.spec.ts` keeps CI and this pin coupled.** It reads
+the major off `ARG NODE_IMAGE` and requires the `test` matrix to carry a leg for
+it, so a future bump with no matching leg goes red rather than shipping an
+untested interpreter. What it cannot catch is a bump to a major the matrix
+_already_ lists -- the matrix is `[24, 25]`, so moving the pin to 25 would pass
+silently. Reading the gate's own docblock before moving the pin is the mitigation;
+there is no narrower one, because a leg that exists really does test that
+interpreter.
+
+To apply the bump on the box, from `~/bluelinky`:
+
+```bash
+docker compose up -d --build
+```
+
+The `--build` is load-bearing: without it compose reuses the existing image and
+the container keeps running node 20 while the Dockerfile says 24. Confirm the
+interpreter and then the next scheduled run:
+
+```bash
+docker exec bluelinky-fuel-monitor node -v
+docker exec bluelinky-fuel-monitor npx tsx /app/status-json.ts
+```
 
 ## Stopping the Monitor
 

@@ -13,7 +13,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
       - run: npm ci
       - name: ESLint
         run: npm run lint
@@ -27,38 +27,40 @@ jobs:
         run: npx prettier --check './src/**/*.{js,jsx,ts,tsx}' './__tests__/**/*.{js,jsx,ts,tsx}' './*.ts'
   test:
     runs-on: ubuntu-latest
-    # 20 is the interpreter production executes: it is what `Dockerfile`'s
-    # `ARG NODE_IMAGE` pins, and the container on plexpi reports v20.20.2
-    # (measured 2026-10-13 via `docker exec bluelinky-fuel-monitor node -v`).
-    # That leg is pinned to the image by `__tests__/node-matrix-gate.spec.ts`,
-    # derived from the Dockerfile -- bump the base image without adding its
-    # major here and the suite goes red.
+    # 24 is the interpreter production executes: it is what `Dockerfile`'s
+    # `ARG NODE_IMAGE` pins as of issue #44. That coupling is enforced by
+    # `__tests__/node-matrix-gate.spec.ts`, which reads the major off the
+    # Dockerfile rather than restating it here -- bump the base image without a
+    # matching leg and the suite goes red.
     #
-    # 24 and 25 buy interpreter-level drift above it, and nothing narrower.
+    # 25 buys interpreter-level drift above the runtime, and nothing narrower.
     # #26 was a TLS regression WITHIN one transport arm, so drift is a failure
-    # this repo has actually had -- but see the correction below before reading
-    # that as a measured justification for these two specific majors.
+    # this repo has actually had. Read that as the reason for a SECOND leg, not
+    # as a measured case for 25 specifically -- there isn't one, see below.
     #
-    # WHAT THIS NO LONGER BUYS, because it used to and the comment outlived it.
-    # These legs were added for the Canadian transport fork, which picked `got`
-    # below Node 21 and undici's `fetch` at or above, so the pair graded a
+    # THE 20 LEG IS GONE, and what it bought went before it. These legs were
+    # added for the Canadian transport fork, which picked `got` below node 21
+    # and undici's `fetch` at or above, so a pair either side of 21 graded a
     # production DEFAULT that was sensitive to the running major. Issue #32
-    # deleted that region. Nothing in the suite reads the running major now --
-    # the legs run byte-identical tests on three interpreters.
+    # deleted that region; nothing in the suite reads the running major now, so
+    # the legs run byte-identical assertions and differ only in interpreter.
+    # With the image on 24, a 20 leg graded an end-of-life interpreter that
+    # nothing in this repo runs any more (node 20 EOL 2026-04-30).
     #
-    # AND ONE FIGURE HERE WAS WRONG BEFORE #32 TOUCHED IT. The previous version
-    # of this comment justified the 25 leg with "plexpi runs 25". Measured
-    # 2026-10-13: plexpi has no host node at all -- not on the login-shell
-    # PATH, no `/usr/bin/node`, no nvm or fnm install, no `nodejs` package --
-    # and the only node on the box is v20.20.2 inside the container. 25 is this
-    # Mac's version, attributed to the wrong host. So the 25 leg has no
-    # measured justification, and never did. Whether three legs is still the
-    # right number is issue #31; this comment records what is known rather than
-    # deciding it.
+    # AND THE 25 LEG'S ORIGINAL JUSTIFICATION WAS FALSE, which is why it is not
+    # restated as one. A previous version of this comment justified it with
+    # "plexpi runs 25". Measured 2026-10-13: plexpi has no host node at all --
+    # not on the login-shell PATH, no `/usr/bin/node`, no nvm or fnm install,
+    # no `nodejs` package -- and the only node on the box was v20.20.2 inside
+    # the container. 25 is this Mac's version, attributed to the wrong host.
+    # It is kept as the second leg, above the runtime rather than below it,
+    # because `node-matrix-gate.spec.ts` floors the matrix at two and a
+    # forward-looking leg is the only kind that can warn before a bump. Whether
+    # two legs is the right number at all is issue #31.
     strategy:
       fail-fast: false
       matrix:
-        node-version: [20, 24, 25]
+        node-version: [24, 25]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -72,6 +74,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
       - run: npm ci
       - run: npm run build
