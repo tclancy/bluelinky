@@ -201,6 +201,35 @@ function read(file: string): string {
 }
 
 /**
+ * The runtime-dependency enumeration in `deployment/README.md`, as a set of
+ * package names.
+ *
+ * Scoped to the ENUMERATION, not to the bullet that holds it. The same bullet
+ * records that `push-receiver` used to be there (issue #24), so a whole-bullet
+ * backtick sweep would read a removed package as a current one and fail
+ * against a correct manifest. The enumeration is the span between
+ * `dependencies only:` and the period closing that sentence; the prose after
+ * it is deliberately out of scope.
+ *
+ * Newlines are flattened first because the list wraps across source lines, so
+ * a line-oriented match would see only its first two or three entries.
+ */
+const RUNTIME_DEPS_PROSE = /runtime npm dependencies only:([^.]*)\./;
+
+function documentedRuntimeDeps(markdown: string): Set<string> {
+  const match = RUNTIME_DEPS_PROSE.exec(markdown.replace(/\r?\n\s*/g, ' '));
+  if (match === null) {
+    return new Set();
+  }
+  return new Set([...match[1].matchAll(/`([^`]+)`/g)].map(entry => entry[1]));
+}
+
+/** The packages a production install actually carries, from the manifest. */
+function declaredRuntimeDeps(): Set<string> {
+  return new Set(Object.keys(JSON.parse(read('package.json')).dependencies ?? {}));
+}
+
+/**
  * Lines inside fenced code blocks -- the ones a human copies and runs.
  *
  * The compose scans below must NOT read prose, because the prose is where this
@@ -613,5 +642,46 @@ describe('deploy surface (issue #18)', () => {
     // Negative: a line that is not the region comment contributes nothing.
     expect([...advertisedRegions('# Vehicle brand (hyundai or kia)')]).toEqual([]);
     expect([...advertisedRegions('BLUELINK_REGION=US')]).toEqual([]);
+  });
+
+  // The two tests below exist because issue #24 was a DOCS defect as much as a
+  // dependency one: `push-receiver` sat in this enumeration for months while
+  // nothing imported it, and nothing compared the list to the manifest. The
+  // deploy surface's own convention is to derive a documented fact from the
+  // file that decides it -- docker-image.spec.ts reads the interpreter out of
+  // the crontab rather than hardcoding `tsx` -- so this list should be
+  // answerable to package.json too.
+  it('enumerates exactly the runtime dependencies package.json declares', () => {
+    const documented = documentedRuntimeDeps(read('deployment/README.md'));
+    const declared = declaredRuntimeDeps();
+
+    // Reachability on both sides. `toEqual` between two empty sets passes, so
+    // a parser that quietly stopped matching -- a reworded bullet, a renamed
+    // heading -- would otherwise read as agreement rather than as a broken
+    // guard.
+    expect(documented.size).toBeGreaterThan(0);
+    expect(declared.size).toBeGreaterThan(0);
+
+    // Equality rather than a subset in either direction. #24's defect was an
+    // EXTRA name in the docs, which documented-minus-declared catches; a new
+    // dependency nobody documents is the same drift pointing the other way,
+    // and only declared-minus-documented catches that. Both are this guard's
+    // business, so both directions are asserted.
+    expect([...documented].sort()).toEqual([...declared].sort());
+  });
+
+  it('reads the enumeration only, sparing prose that names a removed package', () => {
+    // Scope: the live bullet names `push-receiver` in the clause recording its
+    // removal. Picking that up would fail the guard above against a manifest
+    // that is correct.
+    expect(documentedRuntimeDeps(read('deployment/README.md')).has('push-receiver')).toBe(false);
+
+    // Reachability for that absence -- on its own it also passes when the
+    // parser finds nothing at all. A synthetic bullet of the same shape proves
+    // the parser still reads an enumeration while still skipping the prose
+    // after the period.
+    const synthetic =
+      '- The runtime npm dependencies only: `alpha`, `beta`. Then prose about\n  `gamma`, which is not a dependency.';
+    expect([...documentedRuntimeDeps(synthetic)].sort()).toEqual(['alpha', 'beta']);
   });
 });

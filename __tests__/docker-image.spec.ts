@@ -8,8 +8,11 @@ import path from 'path';
  *
  *   1. 1.22 GB, 458 top-level node_modules directories, with `jest`, `rollup`,
  *      `eslint`, `typescript` and `prettier` in the runtime filesystem, plus
- *      `python3`, `make` and `g++`. The runtime dependency list is seven
- *      packages.
+ *      `python3`, `make` and `g++`. The runtime dependency list was six
+ *      packages at that measurement -- #25 itself took it to seven by
+ *      promoting `tsx`, and issue #24 took it back to six by removing
+ *      `push-receiver`. Hence the "six" at the foot of this comment, which
+ *      describes the same pre-#25 image and is not a contradiction.
  *   2. `/app/.env` -- BLUELINK_USERNAME, BLUELINK_PASSWORD, BLUELINK_PIN and the
  *      ntfy credentials, 460 bytes, dated Apr 10 2026 -- baked into an image
  *      layer by `COPY . .` with no `.dockerignore` in the repo at all.
