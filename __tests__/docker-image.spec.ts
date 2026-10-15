@@ -10,9 +10,10 @@ import path from 'path';
  *      `eslint`, `typescript` and `prettier` in the runtime filesystem, plus
  *      `python3`, `make` and `g++`. The runtime dependency list was six
  *      packages at that measurement -- #25 itself took it to seven by
- *      promoting `tsx`, and issue #24 took it back to six by removing
- *      `push-receiver`. Hence the "six" at the foot of this comment, which
- *      describes the same pre-#25 image and is not a contradiction.
+ *      promoting `tsx`, #32 took it back to six by removing `undici`, and
+ *      issue #24 takes it to five by removing `push-receiver`. Hence the
+ *      "six" at the foot of this comment, which describes the same pre-#25
+ *      image and is not a contradiction.
  *   2. `/app/.env` -- BLUELINK_USERNAME, BLUELINK_PASSWORD, BLUELINK_PIN and the
  *      ntfy credentials, 460 bytes, dated Apr 10 2026 -- baked into an image
  *      layer by `COPY . .` with no `.dockerignore` in the repo at all.
@@ -60,9 +61,15 @@ const BUILD_TOOLCHAIN = ['python3', 'make', 'g++', 'gcc'];
  *
  * The figures in the suite docblock at the top of this file are NOT updated by
  * this change and must not be: they are a dated record of the live plexpi image
- * on 2026-10-11, including "the runtime dependency list is seven packages",
- * which was true then. It is six now -- #32 removed `undici` -- and the
- * present-tense figure belongs in `deployment/README.md`, which carries it.
+ * on 2026-10-11. Its runtime dependency list was **six** packages then, not
+ * seven: the docblock said seven until issue #24 re-derived it from
+ * `package.json`'s own history (`e5ce6ea` carried six; #25's `3cf9171`
+ * promoted `tsx` to make seven, later the same day), and the
+ * `npm ls --omit=dev --depth=0` run quoted at the top of this file printed six
+ * off that same image. It is **five** now -- #32 removed `undici`, #24 removes
+ * `push-receiver` -- and the present-tense list belongs in
+ * `deployment/README.md`, which carries it and is gated against the manifest
+ * by `deploy-docs.spec.ts`.
  *
  * WHY IT MOVED, because the next reader will meet this again (issues #40, #42).
  * Issue #32 deleted the Canadian region, and four of the 50 entries were its

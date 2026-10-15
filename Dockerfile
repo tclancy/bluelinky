@@ -5,8 +5,9 @@
 # top-level node_modules directories, and `jest`, `rollup`, `eslint`,
 # `typescript` and `prettier` all present in the runtime filesystem alongside
 # `python3`, `make` and `g++`. The runtime list was six packages at that
-# measurement; this change took it to seven by promoting `tsx`, and issue #24
-# took it back to six by removing `push-receiver`.
+# measurement; this change took it to seven by promoting `tsx`, issue #32 took
+# it back to six by removing `undici`, and issue #24 takes it to five by
+# removing `push-receiver`.
 #
 # What this does NOT fix, so nobody reads a speed promise into it: the `npm ci`
 # layer's cache key is the CONTENT of package.json and package-lock.json, and
