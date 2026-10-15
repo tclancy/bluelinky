@@ -597,7 +597,7 @@ docker exec bluelinky-fuel-monitor /bin/bash -c 'echo "{\"alert50Sent\":false,\"
   `tsx`, `winston`. The lint, test and bundling toolchain is not in the image.
   `undici` was here until issue #32 deleted the Canadian region, which was the
   only thing importing it; `push-receiver` was here until issue #24 removed it:
-  it was declared and never imported, and its subtree was 69 of the 166 packages
+  it was declared and never imported, and its subtree was 69 of the 165 packages
   a production install carried.
   - The saving lands on the next **rebuild**, not on merge: the image running on
     plexpi keeps whatever it was last built with. Every other bullet in this

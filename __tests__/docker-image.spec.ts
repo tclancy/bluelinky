@@ -10,10 +10,13 @@ import path from 'path';
  *      `eslint`, `typescript` and `prettier` in the runtime filesystem, plus
  *      `python3`, `make` and `g++`. The runtime dependency list was six
  *      packages at that measurement -- #25 itself took it to seven by
- *      promoting `tsx`, #32 took it back to six by removing `undici`, and
- *      issue #24 takes it to five by removing `push-receiver`. Hence the
- *      "six" at the foot of this comment, which describes the same pre-#25
- *      image and is not a contradiction.
+ *      promoting `tsx`, #32 took it back to six by removing `undici`, and #24
+ *      takes it to five by removing `push-receiver`. Hence the "six" at the
+ *      foot of this comment, which describes the same pre-#25 image and is
+ *      not a contradiction. That chain is a dated record, one link per
+ *      numbered change, and is NOT the live figure: the live list is the
+ *      enumeration in `deployment/README.md`, which `deploy-docs.spec.ts`
+ *      asserts set-equal to `package.json`.
  *   2. `/app/.env` -- BLUELINK_USERNAME, BLUELINK_PASSWORD, BLUELINK_PIN and the
  *      ntfy credentials, 460 bytes, dated Apr 10 2026 -- baked into an image
  *      layer by `COPY . .` with no `.dockerignore` in the repo at all.
@@ -63,13 +66,15 @@ const BUILD_TOOLCHAIN = ['python3', 'make', 'g++', 'gcc'];
  * this change and must not be: they are a dated record of the live plexpi image
  * on 2026-10-11. Its runtime dependency list was **six** packages then, not
  * seven: the docblock said seven until issue #24 re-derived it from
- * `package.json`'s own history (`e5ce6ea` carried six; #25's `3cf9171`
- * promoted `tsx` to make seven, later the same day), and the
- * `npm ls --omit=dev --depth=0` run quoted at the top of this file printed six
- * off that same image. It is **five** now -- #32 removed `undici`, #24 removes
- * `push-receiver` -- and the present-tense list belongs in
- * `deployment/README.md`, which carries it and is gated against the manifest
- * by `deploy-docs.spec.ts`.
+ * `package.json`'s own history (`e5ce6ea`, 2026-10-07, carried six; #25's
+ * `3cf9171` promoted `tsx` to make seven at 17:27 on 2026-10-11, after the
+ * measurement), and the `npm ls --omit=dev --depth=0` run quoted at the top of
+ * this file printed six off that same image. #32 has since removed `undici`
+ * and #24 removes `push-receiver`. **No present-tense count is written here
+ * deliberately** -- a number in a comment is ungated and drifts on the next
+ * dependency change, which is the drift #24's own new gate exists to stop. The
+ * live list is the enumeration in `deployment/README.md`, asserted set-equal
+ * to the manifest by `deploy-docs.spec.ts`.
  *
  * WHY IT MOVED, because the next reader will meet this again (issues #40, #42).
  * Issue #32 deleted the Canadian region, and four of the 50 entries were its

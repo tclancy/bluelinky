@@ -80,12 +80,24 @@
   notifications, so it can go." One line plus the regenerated lockfile, no
   source change, because there is no source (issue #24).
 - **Measured on a real `npm ci --omit=dev`, not by walking the lockfile.** The
-  production install goes **166 packages to 97** (and 141 top-level
-  `node_modules` directories to 88) -- a delta of **-69**, which is 42% of the
-  production tree. #24's own body quotes the same -69 but states the absolutes
-  as 160 -> 91; both figures were six low, because a lockfile walk and an
-  actual install do not count the same set. The `-69` and the prod+dev
-  898 -> 843 both reproduce exactly.
+  production install goes **165 packages to 96** (and 140 top-level
+  `node_modules` directories to 87) -- a delta of **-69**, which is 42% of the
+  production tree, and the runtime dependency list six packages to **five**.
+  #24's own body quotes the same -69 but states the absolutes as 160 -> 91;
+  both figures are five low, because a lockfile walk and an actual install do
+  not count the same set.
+  - **Those absolutes are one lower than the first measurement of this branch,
+    which read 166 -> 97 and 141 -> 88.** Not a correction of that run: it was
+    taken while this branch was stacked under #41, before #32 landed on `main`
+    and took `undici` out of `dependencies`. Re-measured against the present
+    base by installing `package.json` + `package-lock.json` alone in a scratch
+    directory at four revisions -- `4bee5f3` 166 -> 97, this branch pre-rebase
+    97, `d46e711` 165, here 96. One package, both sides, `-69` unchanged.
+  - The prod+dev delta reproduces at **-55** (859 -> 804 here, 860 -> 805
+    pre-rebase). The `898 -> 843` pair this bullet quoted before carries the
+    same -55 and is **not** reproducible as an absolute: it is 38 higher on
+    both sides, which is platform-gated optional packages resolving differently
+    on the machine that measured it. Trust the delta, not the absolutes.
 - **Four deprecation warnings go, not three, and one stays that the ticket
   never mentioned.** Captured from `npm ci --omit=dev` before and after:
   `request@2.88.2`, `request-promise@4.2.6`, `har-validator@5.1.5` and
