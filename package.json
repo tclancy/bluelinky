@@ -32,7 +32,6 @@
   "dependencies": {
     "better-sqlite3": "^12.9.0",
     "got": "^9.6.0",
-    "push-receiver": "^2.1.1",
     "tough-cookie": "^4.0.0",
     "tsx": "^4.19.4",
     "winston": "^3.3.3"
