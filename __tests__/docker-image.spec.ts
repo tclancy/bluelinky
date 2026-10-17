@@ -173,6 +173,44 @@ const MEASURED_IMAGE_FILES = [
   'tsconfig.json',
 ];
 
+/** Everything under here is re-admitted wholesale by `.dockerignore`'s `!src`. */
+const SRC_PREFIX = 'src/';
+
+/**
+ * The observed listing above, split into the two different questions it was
+ * answering at once (issue #42). **This is the whole of the #42 fix: one
+ * observation, two gradings.**
+ *
+ * The old shape asserted exact correspondence against the WHOLE listing, which
+ * conflated a stable question with a volatile one:
+ *
+ * - **Do the rules match Docker?** Stable. It only changes when somebody edits
+ *   `.dockerignore`, and `*` makes the repo root fail-closed, so adding a
+ *   runtime entrypoint means editing that file anyway.
+ * - **Which files happen to exist under `src/` today?** Volatile, and nothing
+ *   to do with the rules. `!src` re-admits the directory wholesale, so this
+ *   moved every time anyone added a source file -- and because fixing the pin
+ *   needs a docker build that CI does not have, `main` went red and stayed red
+ *   until someone with docker re-measured. That is #40, and it cost ten hours.
+ *
+ * So the non-`src/` half stays an EXACT equality and the `src/` half becomes
+ * derived, with the observed `src/` paths kept as a subset check.
+ *
+ * **The exactness on the non-`src/` half is not optional, and the shape of
+ * that claim was measured rather than argued.** Re-admitting one unenumerated
+ * dev file (`!CHANGELOG.md`) leaves every other test in this file green, so
+ * whatever catches it has to live in the `predicts` test. What catches it is
+ * an *extra-entry* check -- the set equality, or membership plus an exact
+ * length. A bare membership loop or a count floor does not: with the equality
+ * replaced by a `toContain` loop and the length assertion dropped, that
+ * re-admission is green 12/12. See the PR for the round.
+ *
+ * Neither half is hand-maintained: regenerate `MEASURED_IMAGE_FILES` with the
+ * command in its docblock and both follow.
+ */
+const MEASURED_NON_SRC = MEASURED_IMAGE_FILES.filter(file => !file.startsWith(SRC_PREFIX));
+const MEASURED_SRC_OBSERVED = MEASURED_IMAGE_FILES.filter(file => file.startsWith(SRC_PREFIX));
+
 function read(file: string): string {
   return fs.readFileSync(path.join(REPO_ROOT, file), 'utf8');
 }
@@ -657,43 +695,104 @@ describe('runtime image content (issue #25)', () => {
     // only do anything at depth, so a top-level comparison calls `isExcluded`
     // with single-segment paths exclusively and grades neither.
     const predicted = files.filter(file => !isExcluded(file, patterns)).sort();
+    const predictedNonSrc = predicted.filter(file => !file.startsWith(SRC_PREFIX));
+    const predictedSrc = predicted.filter(file => file.startsWith(SRC_PREFIX));
+    const trackedSrc = files.filter(file => file.startsWith(SRC_PREFIX)).sort();
 
-    // Exact correspondence, not membership: a too-permissive allow-list shows
-    // up here as an extra entry, a too-strict one as a missing entry. A
-    // `toContain` loop over the measured list would catch only the second.
+    // (1) THE RULES -- exact correspondence against the observed listing.
     //
-    // WHEN THIS GOES RED, READ THE SIGN ON THE DIFF -- and note that neither
-    // sign implies a code defect on its own (issue #40):
+    // Exact, not membership: a too-permissive allow-list shows up as an extra
+    // entry, a too-strict one as a missing entry, and a BARE `toContain` loop
+    // catches only the second. **Measured, not argued** -- with this equality
+    // replaced by a `toContain` loop and the length assertion below dropped,
+    // re-admitting one unenumerated dev file (`!CHANGELOG.md`) is green 12/12.
+    // The equality kills it with or without that length assertion, and no
+    // other test in this file sees the re-admission at all.
     //
-    //   `+` (in the image, not in the pin)  -- something new ships. If it is a
-    //       file somebody just added under `src/`, the pin is merely stale:
-    //       REGENERATE it with the command in MEASURED_IMAGE_FILES's docblock.
-    //       If it is something else, the allow-list admitted a file nobody
-    //       intended -- which is the defect this file was written for.
-    //   `-` (in the pin, not in the image)  -- something stopped shipping. A
-    //       DELETED or RENAMED `src/` file does this with nothing wrong in the
-    //       code, so again: regenerate. Otherwise the predictor or the
-    //       .dockerignore is wrong, and a file the runtime reads may be absent
-    //       from the image -- fix the code, not the pin.
+    // It can afford to be exact because it no longer moves when someone adds a
+    // source file -- that was issue #40 and it is now (2)'s business. The repo
+    // root is fail-closed (`*`), so a NEW non-`src/` entry here means somebody
+    // deliberately edited `.dockerignore`, which is the right moment to
+    // re-measure. WHEN THIS GOES RED, read the sign:
     //
-    // A rename shows BOTH signs. There is no direction here whose remedy is
-    // unambiguous, which is why this is a comment and not an assertion: an
-    // earlier draft of this change computed the two sets and asserted both
-    // empty, on the stated grounds that the directions had opposite remedies.
-    // They do not, and the assertion was implied by the equality below, so it
-    // could never fail where this passes -- 22 lines that added no coverage and
-    // justified themselves with something untrue.
+    //   `+` (in the image, not in the observation) -- either that deliberate
+    //       re-admission, in which case REGENERATE with the command in
+    //       MEASURED_IMAGE_FILES's docblock; or the allow-list is admitting a
+    //       file nobody intended, which is the defect this file exists for.
+    //   `-` (in the observation, not in the image) -- something the runtime
+    //       reads stopped shipping. Fix the code, not the observation.
     //
-    // Whatever the sign: NEVER paste `predicted` into the pin. That makes the
-    // control a copy of the thing it grades, and this assertion is the only
-    // thing in the file answerable to Docker rather than to our own evaluator.
-    expect(predicted).toEqual([...MEASURED_IMAGE_FILES].sort());
+    // Either way: NEVER paste `predicted` into the observation. That makes the
+    // control a copy of the thing it grades.
+    expect(predictedNonSrc).toEqual([...MEASURED_NON_SRC].sort());
 
-    // Reachability: the control is only a control if it is non-trivial and the
-    // evaluator is actually excluding things. An empty `files`, or an
-    // allow-list that admitted everything, would satisfy the equality above
-    // against a correspondingly empty or complete pin.
-    expect(predicted.length).toBeGreaterThan(40);
+    // (2) `src/` MEMBERSHIP -- derived, never pinned.
+    //
+    // `!src` re-admits the directory wholesale, so the correct expectation is
+    // "every tracked file under `src/`, whatever they happen to be today",
+    // which cannot go stale. That is the entire point of issue #42.
+    //
+    // **This RESTATES the `dropped` assertion in `keeps every file the runtime
+    // actually reads` above, and adds no power over it.** `predictedSrc` is
+    // filtered out of `files`, so it is a subset of `trackedSrc` whatever the
+    // rules say; the equality can only fail in the missing direction, which is
+    // exactly `expect(dropped).toEqual([])`. There is no input that separates
+    // them. It is here so the three gradings read together, and written as an
+    // equality for the failure message -- not because it catches anything the
+    // other test does not. A mutation round weakening it to `toContain`
+    // survives on its own, for the same reason.
+    expect(predictedSrc).toEqual(trackedSrc);
+
+    // (3) ...but (2) and the `dropped` check both derive from the same
+    // `git ls-files` the predictor reads, so between them they only prove the
+    // evaluator agrees with itself. These paths were OBSERVED in a real build,
+    // and keeping them is what makes `!src` answerable to Docker.
+    //
+    // Intersected with what is tracked TODAY, and that intersection is half of
+    // the #42 fix rather than a convenience. #42's problem statement is "every
+    // PR that adds, DELETES or RENAMES a file under `src/`": without the
+    // filter, deleting or renaming a source file leaves its path in the
+    // observation, absent from `predictedSrc`, and the loop below goes red
+    // with nothing wrong -- the same false red as the add case, arriving from
+    // the other side. A path that is no longer tracked has no claim to make.
+    //
+    // What survives the filter still has teeth: a file that is tracked and
+    // stops shipping stays in the set and fails the loop. So the control holds
+    // in the direction that is a defect and yields in the two that are not.
+    //
+    // WHEN THE LOOP GOES RED, the path it names is tracked and is not
+    // predicted to ship, which means the rules stopped admitting something the
+    // runtime reads. That is a code defect -- fix `.dockerignore`, not the
+    // observation. (And note the remedy for a legitimately stale entry never
+    // needs docker: DELETING a line from `MEASURED_IMAGE_FILES` cannot turn
+    // the control into a copy of the predictor. Only adding one can.)
+    const observedStillTracked = MEASURED_SRC_OBSERVED.filter(file => files.includes(file));
+
+    // The observation must stay broad and DEEP, because the ancestor rule and
+    // last-match-wins only do anything below the top level. The depth set is
+    // asserted rather than a maximum: trimming the observation to depths 3 and
+    // 4 would still clear a `>= 4` max while losing every depth-2 case.
+    expect(observedStillTracked.length).toBeGreaterThan(20);
+    expect(new Set(observedStillTracked.map(file => file.split('/').length))).toEqual(
+      new Set([2, 3, 4])
+    );
+    for (const observed of observedStillTracked) {
+      expect(predictedSrc).toContain(observed);
+    }
+
+    // Degenerate input is already handled elsewhere, and this block does NOT
+    // repeat it -- an earlier draft claimed it did and was wrong twice over.
+    // An empty `files` fails the floor in `beforeAll` and this test never
+    // runs; an all-admitting evaluator fails (1)'s equality above. Both of the
+    // inputs that draft named die before reaching here.
+    //
+    // What is left is one piece of insurance and one live assertion. The
+    // length check is implied by (1)'s equality TODAY and exists only to keep
+    // the hole shut if somebody ever weakens that equality to membership --
+    // see MEASURED_NON_SRC's docblock, where the measured claim is that an
+    // extra entry needs the equality OR an exact length, and removing both is
+    // green. The last line is the only one here that can fail as written.
+    expect(predictedNonSrc).toHaveLength(MEASURED_NON_SRC.length);
     expect(files.length).toBeGreaterThan(predicted.length);
   });
 
