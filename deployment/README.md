@@ -452,7 +452,8 @@ silently. That is not a defect: a leg that exists really does run the suite on
 that interpreter, so there is no narrower mitigation available than reading the
 gate's own docblock before moving the pin. What the gate cannot tell you either
 way is whether the suite PASSES on the new major; that is the leg's job, which
-is why 26 was measured green (194/194 on v26.11.1) before it was added rather
+is why 26 was measured green (194/194 on v26.11.1 -- the suite was 194 tests at
+that commit, and #24 has since added three) before it was added rather
 than inferred from the leg's existence.
 
 Applying the bump on the box is the ordinary code-update path -- see
@@ -627,10 +628,12 @@ docker exec bluelinky-fuel-monitor /bin/bash -c 'echo "{\"alert50Sent\":false,\"
   cost. It was 266 MB on node 20 (issue #25) and 1.22 GB before that, so the
   node 24 base costs about 25 MB. **Both figures predate issue #24**, which
   dropped `push-receiver` and 69 of the 165 packages a production install
-  carried, so a build from current `main` should come in under 291 MB; the
-  25 MB delta still holds, because both sides of it were measured on the same
-  dependency set. BuildKit's cache is the part that grows, and
-  `docker system df` on plexpi showed 32.6 GB of it on 2026-10-11.
+  carried, so a build from this checkout should come in under 291 MB. The
+  25 MB figure is an approximation and slightly low: both sides carried
+  `push-receiver`, so #24 does not bias it, but `undici` left between them
+  (#32, ~1.5 MB installed), so the node base alone costs nearer 26.5 MB.
+  BuildKit's cache is the part that grows, and `docker system df` on plexpi
+  showed 32.6 GB of it on 2026-10-11.
 - Internet connection for the Bluelink API and the configured alert backend
 
 **The container provides:**
@@ -649,7 +652,7 @@ docker exec bluelinky-fuel-monitor /bin/bash -c 'echo "{\"alert50Sent\":false,\"
     plexpi keeps whatever it was last built with. So does the node major in the
     bullet above -- `docker compose up -d` without `--build` reuses the existing
     image and leaves the container on v20 (issue #44). The remaining bullets are
-    properties of the checkout and are unaffected by either.
+    structural and name no version, so rebuild timing cannot falsify them.
 - cron daemon
 - All TypeScript files
 - Isolated filesystem

@@ -62,11 +62,11 @@
   a bot.
 - **`deployment/README.md` is rewritten for the post-bump state.** The
   "container provides Node.js 20" line in System Requirements is corrected, the
-  image size is re-measured (266 MB on node 20 to 291 MB on 24, both before
-  #24's dependency removal), and the
-  post-merge deploy step cross-references the existing "Updating the Code"
-  section rather than restating the command a sixth time -- that duplication is
-  how the node-20 line survived four other edits.
+  image size is re-measured (266 MB on node 20 to 291 MB on 24, both measured
+  before #24's dependency removal), and the post-merge deploy step
+  cross-references the existing "Updating the Code" section rather than
+  restating the command a sixth time -- that duplication is how the node-20
+  line survived four other edits.
 
 ## 2026-10-13
 
