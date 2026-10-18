@@ -625,9 +625,12 @@ docker exec bluelinky-fuel-monitor /bin/bash -c 'echo "{\"alert50Sent\":false,\"
   itself is 291 MB as of issue #44 -- measured off a `--platform linux/arm64`
   build on an aarch64 Mac, so it is the image's size and not plexpi's build
   cost. It was 266 MB on node 20 (issue #25) and 1.22 GB before that, so the
-  node 24 base costs about 25 MB. BuildKit's cache is
-  the part that grows, and `docker system df` on plexpi showed 32.6 GB of it on
-  2026-10-11.
+  node 24 base costs about 25 MB. **Both figures predate issue #24**, which
+  dropped `push-receiver` and 69 of the 165 packages a production install
+  carried, so a build from current `main` should come in under 291 MB; the
+  25 MB delta still holds, because both sides of it were measured on the same
+  dependency set. BuildKit's cache is the part that grows, and
+  `docker system df` on plexpi showed 32.6 GB of it on 2026-10-11.
 - Internet connection for the Bluelink API and the configured alert backend
 
 **The container provides:**
@@ -636,10 +639,17 @@ docker exec bluelinky-fuel-monitor /bin/bash -c 'echo "{\"alert50Sent\":false,\"
   supported to 2028-04-30, per `nodejs/Release`'s `schedule.json`). It was
   node 20 until issue #44; nothing in the tree branches on the running major,
   so the bump was a version change rather than a transport decision.
-- The runtime npm dependencies only: `better-sqlite3`, `got`, `push-receiver`,
-  `tough-cookie`, `tsx`, `winston`. The lint, test and bundling toolchain is not
-  in the image. `undici` was here until issue #32 deleted the Canadian region,
-  which was the only thing importing it.
+- The runtime npm dependencies only: `better-sqlite3`, `got`, `tough-cookie`,
+  `tsx`, `winston`. The lint, test and bundling toolchain is not in the image.
+  `undici` was here until issue #32 deleted the Canadian region, which was the
+  only thing importing it; `push-receiver` was here until issue #24 removed it:
+  it was declared and never imported, and its subtree was 69 of the 165 packages
+  a production install carried.
+  - The saving lands on the next **rebuild**, not on merge: the image running on
+    plexpi keeps whatever it was last built with. So does the node major in the
+    bullet above -- `docker compose up -d` without `--build` reuses the existing
+    image and leaves the container on v20 (issue #44). The remaining bullets are
+    properties of the checkout and are unaffected by either.
 - cron daemon
 - All TypeScript files
 - Isolated filesystem
