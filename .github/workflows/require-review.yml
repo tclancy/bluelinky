@@ -104,9 +104,20 @@ jobs:
           # commented-out one is still parsed. An earlier draft of this
           # paragraph spelled the token out with an empty expression inside it,
           # which is not a valid expression -- and that made the whole workflow
-          # file invalid. GitHub reported it as a `push` run with zero jobs,
-          # named by path rather than by `name:`, with no annotation and no log,
-          # while `check-yaml`, `prettier` and `action-validator` all passed it.
+          # file invalid.
+          #
+          # The tell was a `push` run -- an event this workflow has no trigger
+          # for -- that FAILED with zero jobs, no annotation and no log; `gh run
+          # view` says only "This run likely failed because of a workflow file
+          # issue". `check-yaml`, `prettier` and `@action-validator/cli` all
+          # passed the file, including against a known-good control.
+          #
+          # What is NOT a tell, though it looks like one: this workflow appears
+          # in `gh api actions/workflows` under its PATH rather than its
+          # `name:`. That is just what GitHub shows for a workflow absent from
+          # the DEFAULT branch -- the run that succeeded after the fix displays
+          # the same way. Read the zero-jobs failure, not the name.
+          #
           # Bisected on 2026-10-23 by pushing five cumulative probe files in one
           # commit. `__tests__/review-gate.spec.ts` now bans the token from
           # every `run:` block in both workflows, which is the same rule the

@@ -780,11 +780,17 @@ describe('every workflow run: block is valid shell', () => {
    *      expression, so the entire workflow file became invalid.
    *
    * What that failure looked like, because it is worth recognising: a `push`
-   * run with ZERO jobs, named by its path instead of by its `name:`, with no
-   * annotation, no log and no check-run to read. `check-yaml`, `prettier` and
-   * `@action-validator/cli` all passed the file. It was located by pushing
-   * five cumulative probe workflows in one commit and seeing which of them
-   * GitHub refused.
+   * run — an event the workflow has no trigger for — that FAILED with ZERO
+   * jobs, no annotation, no log and no check-run to read. `check-yaml`,
+   * `prettier` and `@action-validator/cli` all passed the file, including
+   * against a known-good control. Located by pushing five cumulative probe
+   * workflows in one commit and seeing which ones GitHub refused.
+   *
+   * One thing that is NOT a tell, though it reads like one: the workflow
+   * showing up under its path rather than its `name:` in
+   * `gh api actions/workflows`. That is simply how GitHub lists a workflow
+   * absent from the DEFAULT branch, and the run that succeeded after the fix
+   * displays identically.
    *
    * So this is banned as a TOKEN rather than as a specific malformed
    * expression: the valid spellings are a security problem and the invalid
