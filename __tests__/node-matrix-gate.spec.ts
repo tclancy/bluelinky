@@ -32,10 +32,20 @@ import path from 'path';
  * trigger. Rewriting `on:` to `workflow_dispatch` only would leave every
  * assertion below green -- but it also stops `lint` and `build`, so it is
  * self-announcing in a way the per-leg neutralisations below are not.
+ *
+ * **Second describe block, added for #49: the majors pinned OUTSIDE the
+ * matrix.** Everything above grades `test`. `lint`, `build` and `publish` each
+ * set `node-version:` to a bare literal, and nothing could see them -- which is
+ * how all three sat on node 20 for months past its 2026-04-30 end of life while
+ * this file was green. It reads `npmpublish.yaml` as well as `ci.yaml`, because
+ * leaving the publish job out would preserve exactly one third of the condition
+ * #49 describes.
  */
 
 const ROOT = path.join(__dirname, '..');
 const WORKFLOW = path.join(ROOT, '.github', 'workflows', 'ci.yaml');
+const PUBLISH_WORKFLOW = path.join(ROOT, '.github', 'workflows', 'npmpublish.yaml');
+const WORKFLOW_DIR = path.join(ROOT, '.github', 'workflows');
 const DOCKERFILE = path.join(ROOT, 'Dockerfile');
 
 /**
@@ -228,5 +238,217 @@ describe('the CI node-version matrix', () => {
     expect(keysAt(steps.replace(/^ {6}- /gm, '        '), 8)).toEqual(
       new Set(['uses', 'with', 'run'])
     );
+  });
+});
+
+/**
+ * Every `node-version`-ish line in a workflow, sorted by how it sets its value.
+ *
+ * Four forms are recognised, and the fourth is why this is a partition rather
+ * than a search:
+ *
+ *   graded        `node-version: 24`, `'24'`, `24.x`, `24.1.0`, with or
+ *                 without a trailing `#` comment -> the major is extracted and
+ *                 compared to the Dockerfile
+ *   matrix-ref    `node-version: ${{ matrix.anything }}`  -> the matrix's job,
+ *                 graded by the first describe block above
+ *   matrix-list   `node-version: [24, 26]`                -> the matrix itself
+ *   ungraded      ANYTHING else: `node-version-file: .nvmrc`, `lts/*`,
+ *                 `latest`, or `${{ env.NODE }}` / `${{ vars.NODE }}` /
+ *                 `${{ inputs.node }}` -- an interpolation from a source this
+ *                 file cannot read, which could resolve to 18
+ *
+ * Every one of those ungraded forms is a working pin that sets the interpreter
+ * and tells this gate nothing, so each is a silent escape from the invariant
+ * rather than an exotic edge case. They are collected as raw text and asserted
+ * EMPTY, which is what makes the partition closed: a form nobody anticipated
+ * lands here and fails by name rather than by going quietly uncounted.
+ *
+ * `node-version-file:` in particular is invisible to a `/node-version:/` scan
+ * -- the key is a different key -- so it is matched on its own, deliberately.
+ */
+interface Pin {
+  line: number;
+  text: string;
+  major: number;
+}
+
+interface Classification {
+  file: string;
+  total: number;
+  graded: Pin[];
+  matrixRef: string[];
+  matrixList: string[];
+  ungraded: string[];
+}
+
+/** A `node-version:`/`node-version-file:` line, minus any trailing comment. */
+const KEY = /^\s*node-version(-file)?:\s*(.*)$/;
+/** A value naming a major: `24`, `'24'`, `"24.x"`, `24.1.0`. */
+const MAJOR = /^['"]?(\d+)(?:\.(?:x|\d+(?:\.\d+)?))?['"]?$/;
+
+function classify(file: string, source: string): Classification {
+  const result: Classification = {
+    file: path.basename(file),
+    total: 0,
+    graded: [],
+    matrixRef: [],
+    matrixList: [],
+    ungraded: [],
+  };
+
+  source
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .forEach((raw, index) => {
+      const match = raw.match(KEY);
+      if (!match) return;
+      result.total += 1;
+
+      const isFileKey = match[1] !== undefined;
+      // Strip a trailing comment, but only one introduced by whitespace-then-#,
+      // so a `#` inside `${{ }}` or a quoted value survives.
+      const value = match[2].replace(/\s+#.*$/, '').trim();
+
+      if (isFileKey) {
+        result.ungraded.push(raw.trim());
+        return;
+      }
+      const major = value.match(MAJOR);
+      if (major) {
+        result.graded.push({ line: index + 1, text: raw.trim(), major: Number(major[1]) });
+        return;
+      }
+      // Anchored on `matrix.` on purpose: `${{ env.NODE }}` is equally valid
+      // YAML and resolves somewhere this file cannot read, so it is ungraded,
+      // not matrix-ref.
+      if (/^\$\{\{\s*matrix\.[A-Za-z0-9_-]+\s*\}\}$/.test(value)) {
+        result.matrixRef.push(raw.trim());
+        return;
+      }
+      if (/^\[[^\]]*\]$/.test(value)) {
+        result.matrixList.push(raw.trim());
+        return;
+      }
+      result.ungraded.push(raw.trim());
+    });
+
+  return result;
+}
+
+/**
+ * Every workflow in `.github/workflows/`, discovered rather than listed.
+ *
+ * A hardcoded pair would have reproduced #49's own bug one level up: a new
+ * workflow pinning node 18 would be invisible, and an `expect(files).toBe(2)`
+ * beside it is a check against a constant in this same file, so it could not
+ * notice either. The floor below is a sanity check on the glob, not the
+ * completeness claim -- completeness comes from globbing the directory.
+ */
+function workflowFiles(): string[] {
+  return fs
+    .readdirSync(WORKFLOW_DIR)
+    .filter(name => /\.ya?ml$/.test(name))
+    .map(name => path.join(WORKFLOW_DIR, name))
+    .sort();
+}
+
+const classifications = () =>
+  workflowFiles().map(file => classify(file, fs.readFileSync(file, 'utf8')));
+
+describe('the node majors pinned outside the matrix (#49)', () => {
+  it('control: classify sorts each form, and routes anything else to `ungraded`', () => {
+    // Without this, every assertion below is a claim about whatever the regexes
+    // happened to match. The last four cases are the ones that matter: each is
+    // a working pin that an earlier draft of this block let through silently.
+    const c = classify(
+      'x/ci.yaml',
+      [
+        '          node-version: 24',
+        "          node-version: '24'",
+        '          node-version: 24.x',
+        '          node-version: 24 # keep in sync with the Dockerfile',
+        '          node-version: ${{ matrix.node-version }}',
+        '        node-version: [24, 26]',
+        '          node-version: ${{ env.LINT_NODE }}',
+        '          node-version: lts/*',
+        '          node-version-file: .nvmrc',
+        '          node-version: latest',
+      ].join('\n')
+    );
+
+    expect(c.file).toBe('ci.yaml');
+    expect(c.total).toBe(10);
+    expect(c.graded.map(pin => pin.major)).toEqual([24, 24, 24, 24]);
+    expect(c.graded.map(pin => pin.line)).toEqual([1, 2, 3, 4]);
+    expect(c.matrixRef).toHaveLength(1);
+    expect(c.matrixList).toHaveLength(1);
+    expect(c.ungraded).toEqual([
+      'node-version: ${{ env.LINT_NODE }}',
+      'node-version: lts/*',
+      'node-version-file: .nvmrc',
+      'node-version: latest',
+    ]);
+    // Closed, not merely populated.
+    expect(c.graded.length + c.matrixRef.length + c.matrixList.length + c.ungraded.length).toBe(
+      c.total
+    );
+  });
+
+  it('every workflow is discovered, and none sets the interpreter in an ungradeable way', () => {
+    // NOT a `pinned.length >= 1` floor. A floor passes a NEW pin the reader
+    // cannot see -- which is the regression this block exists to prevent -- so
+    // this asserts the buckets account for every line, and that the escape
+    // bucket is empty, per file and by name.
+    const found = classifications();
+    const names = found.map(c => c.file);
+    expect(names).toEqual(expect.arrayContaining(['ci.yaml', 'npmpublish.yaml']));
+
+    for (const c of found) {
+      expect({ file: c.file, ungraded: c.ungraded }).toEqual({ file: c.file, ungraded: [] });
+      expect(c.graded.length + c.matrixRef.length + c.matrixList.length).toBe(c.total);
+    }
+  });
+
+  it('every pinned major equals the major the runtime image runs', () => {
+    // Strict equality, not `>=`, and the choice is worth stating because #49
+    // left it open.
+    //
+    // The gate is a DIVERGENCE gate, not an end-of-life gate -- neither form
+    // could have caught the thing #49's summary line implies. Before #44 the
+    // literals were 20 and `ARG NODE_IMAGE` was `node:20-slim`: they agreed, so
+    // both `>=` and `==` are green on it. No assertion comparing CI pins to the
+    // Dockerfile can know the Dockerfile is itself EOL. What this DOES catch is
+    // the next bump leaving a literal behind, which is the state #44 would have
+    // created in three jobs at once had it not been spotted by hand.
+    //
+    // `>=` would permit `build` and `publish` to produce and ship the artifact
+    // on a newer interpreter than production runs, while catching strictly less
+    // than equality does. Equality states one invariant -- every node major in
+    // CI outside the matrix is the runtime's -- and makes every future bump
+    // move the Dockerfile and the workflows together. Editing this test is the
+    // only sanctioned way to exempt a job; quoting the value, writing `24.x` or
+    // reaching for `node-version-file` will not do it.
+    const found = classifications();
+    const pins = found.flatMap(c => c.graded.map(pin => ({ file: c.file, ...pin })));
+
+    // The vacuity guard, deliberately in THIS test rather than only in the one
+    // above: the loop below iterates zero times on an empty list and passes. A
+    // sibling test going red still blocks CI, but `jest -t` on this one would
+    // read green, and a maintainer deleting the "redundant" control would
+    // disarm the gate silently.
+    expect(pins.length).toBeGreaterThanOrEqual(1);
+
+    const runtime = runtimeImageMajor();
+    for (const pin of pins) {
+      // Compared as an object so a failure names the file, the line and the
+      // offending text rather than printing `Expected: 24 / Received: 20`.
+      expect({ file: pin.file, line: pin.line, text: pin.text, major: pin.major }).toEqual({
+        file: pin.file,
+        line: pin.line,
+        text: pin.text,
+        major: runtime,
+      });
+    }
   });
 });
