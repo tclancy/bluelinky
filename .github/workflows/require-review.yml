@@ -92,10 +92,25 @@ jobs:
           set -euo pipefail
           # `issue_comment` carries no pull_request object, so the head SHA has
           # to be looked up. `pull_request` and `pull_request_review` both have
-          # it. Values come through `env:` rather than `${{ }}` interpolated
-          # into the script body: a PR title or comment body spliced straight
-          # into shell is a command-injection surface, and one of the fields
-          # read below IS the PR title.
+          # it.
+          #
+          # Every value arrives through `env:` above rather than being
+          # interpolated into this script by a GitHub expression. A PR title or
+          # comment body spliced straight into shell is a command-injection
+          # surface, and one of the fields read here IS the PR title.
+          #
+          # And an expression in a `run:` body is not inert even in a COMMENT:
+          # GitHub evaluates them before the shell ever sees the script, so a
+          # commented-out one is still parsed. An earlier draft of this
+          # paragraph spelled the token out with an empty expression inside it,
+          # which is not a valid expression -- and that made the whole workflow
+          # file invalid. GitHub reported it as a `push` run with zero jobs,
+          # named by path rather than by `name:`, with no annotation and no log,
+          # while `check-yaml`, `prettier` and `action-validator` all passed it.
+          # Bisected on 2026-10-23 by pushing five cumulative probe files in one
+          # commit. `__tests__/review-gate.spec.ts` now bans the token from
+          # every `run:` block in both workflows, which is the same rule the
+          # paragraph above asks for anyway.
           if [ "$EVENT_NAME" = "issue_comment" ]; then
             number="$ISSUE_NUMBER"
             sha="$(gh api "repos/${REPO}/pulls/${number}" --jq .head.sha)"

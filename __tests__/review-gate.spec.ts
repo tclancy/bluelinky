@@ -1,5 +1,6 @@
 import { execFileSync } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 /**
@@ -759,6 +760,64 @@ describe('every workflow run: block is valid shell', () => {
       // `bash -n` parses without executing. Throws on a syntax error, which
       // jest reports as the failure.
       execFileSync('bash', ['-n'], { input: block, encoding: 'utf8' });
+    }
+  });
+
+  /**
+   * No GitHub expression may appear in a `run:` body — not even in a comment.
+   *
+   * This is two rules that happen to be one check, and the second is the
+   * reason the test exists rather than the first.
+   *
+   *   1. SECURITY, which is the rule the workflows already follow by design:
+   *      every value reaches these scripts through `env:`, because a PR title
+   *      or comment body interpolated into shell is a command-injection
+   *      surface and one of the fields read here IS the PR title.
+   *   2. VALIDITY. GitHub evaluates expressions in a `run:` body before the
+   *      shell sees the script, so one inside a `#` comment is still parsed.
+   *      An earlier draft wrote the token with an EMPTY expression inside it
+   *      while explaining rule 1 — and an empty expression is not a valid
+   *      expression, so the entire workflow file became invalid.
+   *
+   * What that failure looked like, because it is worth recognising: a `push`
+   * run with ZERO jobs, named by its path instead of by its `name:`, with no
+   * annotation, no log and no check-run to read. `check-yaml`, `prettier` and
+   * `@action-validator/cli` all passed the file. It was located by pushing
+   * five cumulative probe workflows in one commit and seeing which of them
+   * GitHub refused.
+   *
+   * So this is banned as a TOKEN rather than as a specific malformed
+   * expression: the valid spellings are a security problem and the invalid
+   * ones are a parse problem, and the design wants zero of either.
+   */
+  it.each([
+    ['claude-code-review.yml', REVIEWER],
+    ['require-review.yml', REQUIRE],
+  ])('%s has no GitHub expression in any run: body', (_name, file) => {
+    const blocks = runBlocks(file);
+    expect(blocks.length).toBeGreaterThanOrEqual(2);
+    for (const block of blocks) {
+      expect(block).not.toContain('${{');
+    }
+  });
+
+  it('control: the run-block reader would actually see an injected expression', () => {
+    // The assertion above is an ABSENCE, and the reader it depends on is
+    // hand-rolled. Without this, a reader that silently stopped finding run
+    // blocks — or a path that no longer resolves — would pass it forever.
+    // Proves the reader locates real bodies AND that a planted token is
+    // visible to the same code path.
+    const planted = fs
+      .readFileSync(REQUIRE, 'utf8')
+      .replace(/^(\s*)set -euo pipefail$/m, '$1echo "${{ github.event.pull_request.title }}"');
+    const tmp = path.join(os.tmpdir(), `review-gate-control-${process.pid}.yml`);
+    fs.writeFileSync(tmp, planted);
+    try {
+      const blocks = runBlocks(tmp);
+      expect(blocks.length).toBeGreaterThanOrEqual(2);
+      expect(blocks.some(b => b.includes('${{'))).toBe(true);
+    } finally {
+      fs.unlinkSync(tmp);
     }
   });
 
