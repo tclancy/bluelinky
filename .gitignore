@@ -15,3 +15,7 @@ CLAUDE.md
 .fuel-alert-state.json
 .claude
 DEPLOYMENT_ISSUE.md
+# Agent scratch space (mutation harnesses, probe scripts, patches). Never
+# committed -- it exists so `git add -A` in an agent session cannot sweep a
+# half-finished harness into a commit.
+.scratch/

@@ -1,0 +1,214 @@
+name: Require Code Review
+
+# Issue #35, option (a), second half. The first half (`claude-code-review.yml`)
+# PRODUCES a review; this publishes a commit status saying whether one exists
+# for the CURRENT head, so a PR that has not been reviewed reads red instead of
+# reading exactly like a reviewed one.
+#
+# WHY A COMMIT STATUS AND NOT THIS JOB'S OWN CHECK. A check-run attaches to the
+# SHA of the event that triggered it. An `issue_comment` run executes in the
+# default-branch context, so its implicit check lands on `main`'s tip and never
+# touches the PR head -- which is the whole mechanism behind metaframework#620.
+# Posting to `repos/.../statuses/<head sha>` targets the PR head from either
+# trigger. This job therefore always succeeds; the verdict is the status.
+#
+# WHY NOT VENDOR metaframework's `review_gate.py`. It is 668 lines and lives in
+# a PRIVATE repo, so a public repo's `github.token` cannot read it cross-repo
+# and `actions/checkout` with no `repository:` would look for
+# `bluelinky/src/dispatch/review_gate.py` and find nothing. Its extra
+# sophistication (errored-run checklists, docs-only skip, round counting) is
+# tuning for that repo's own history. The decision here is `.github/review-gate.jq`
+# -- a pure jq function, unit-tested by `__tests__/review-gate.spec.ts`, with
+# `jq` and `gh` both preinstalled on `ubuntu-latest`, so this job needs no
+# checkout of `node_modules`, no `npm ci` and no language runtime.
+#
+# NOT A MERGE BLOCK. `main` has no branch protection and no rulesets (measured
+# 2026-10-23), so this status blocks nothing. The red X is backpressure for
+# autonomous agents, which is what #35 asked for.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  issue_comment:
+    # `edited` as well as `created`, and that is a consequence of the gate's
+    # own rule rather than a nicety. `.github/review-gate.jq` only counts a bot
+    # comment once its progress checklist has no outstanding `- [ ]` items, and
+    # `track_progress: true` posts that checklist unticked and EDITS it to
+    # completion in place. On `created` alone the gate could never observe the
+    # boxes get ticked. The cost is one run per edit during a live review; they
+    # are ~15s, and this repo is public, where Actions minutes are free.
+    types: [created, edited]
+  # A formal APPROVED / CHANGES_REQUESTED satisfies the gate -- it is how Tom
+  # satisfies it himself -- but it arrives as `pull_request_review`, not as an
+  # `issue_comment`. Without this, approving a PR yourself left the red X
+  # sitting there (metaframework had the same bug).
+  pull_request_review:
+    types: [submitted]
+
+concurrency:
+  group: require-review-${{ github.event.pull_request.number || github.event.issue.number }}
+  # MUST stay false. GitHub paints a *cancelled* run red on the PR even when
+  # the authoritative status this workflow publishes is green, which is what
+  # made three metaframework PRs read UNSTABLE with every real check passing
+  # (metaframework#511). The concurrency group still serialises, so two runs
+  # never race to write the same commit status, and a run still pending when a
+  # newer one queues is dropped -- which is what bounds the `edited` burst.
+  cancel-in-progress: false
+
+jobs:
+  require-review:
+    # For `issue_comment`, only run when the comment could change the answer:
+    # the review bot posting or ticking its own comment (the self-heal path), or
+    # anyone asking for `/review`. Ordinary human discussion is skipped.
+    if: >-
+      github.event_name != 'issue_comment' ||
+      (github.event.issue.pull_request &&
+       (github.event.comment.user.login == 'claude[bot]' ||
+        contains(github.event.comment.body, '/review')))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      statuses: write
+    steps:
+      # Only the one file. No `npm ci`, no `setup-node`: the gate is a jq
+      # program and `ubuntu-latest` ships jq and gh already.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/review-gate.jq
+          sparse-checkout-cone-mode: false
+
+      - name: Resolve PR number and head SHA
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # `issue_comment` carries no pull_request object, so the head SHA has
+          # to be looked up. `pull_request` and `pull_request_review` both have
+          # it. Values come through `env:` rather than `${{ }}` interpolated
+          # into the script body: a PR title or comment body spliced straight
+          # into shell is a command-injection surface, and one of the fields
+          # read below IS the PR title.
+          if [ "$EVENT_NAME" = "issue_comment" ]; then
+            number="$ISSUE_NUMBER"
+            sha="$(gh api "repos/${REPO}/pulls/${number}" --jq .head.sha)"
+          else
+            number="$PR_NUMBER"
+            sha="$PR_HEAD_SHA"
+          fi
+          echo "number=${number}" >> "$GITHUB_OUTPUT"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
+      # A cross-repository PR's `GITHUB_TOKEN` is read-only, so `statuses:
+      # write` above is not granted and the POST below would 403 -- turning
+      # every outside contribution into a red *workflow* run, which is worse
+      # than no gate. The reviewer skips the same PRs for the matching reason
+      # (it cannot post inline comments either). Outside contributions get
+      # Tom's own review; this gate is backpressure on agent PRs.
+      #
+      # THE DISCRIMINATOR IS `head.repo.full_name`, NOT `head.repo.fork`. See
+      # the long note on the same `if:` in `claude-code-review.yml`: this repo
+      # IS a fork, so `head.repo.fork` is `true` for every same-repo branch in
+      # it, and keying on it skips 100% of this repo's PRs while looking right.
+      - name: Is this a cross-repository PR?
+        id: fork
+        env:
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            head_repo="$HEAD_REPO"
+          else
+            head_repo="$(gh api "repos/${REPO}/pulls/${NUMBER}" --jq '.head.repo.full_name')"
+          fi
+          # Default to "yes, cross-repo" when the head repo cannot be read at
+          # all: a DELETED head repo reports `null`, and skipping is the safe
+          # direction (no status is better than a 403-failed job).
+          if [ "$head_repo" = "$REPO" ]; then
+            fork=false
+          else
+            fork=true
+          fi
+          echo "fork=${fork}" >> "$GITHUB_OUTPUT"
+          # An `if`, not `[ ... ] && echo`: under `set -e` a false test makes
+          # the whole AND-list exit 1 and takes the step down with it, so the
+          # same-repo case -- the common one -- would fail the job.
+          if [ "$fork" = "true" ]; then
+            echo "::notice::Cross-repository PR (head ${head_repo}) - review gate skipped; its token cannot write a commit status."
+          fi
+
+      - name: Evaluate the gate and publish the status to the PR head
+        if: steps.fork.outputs.fork != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ steps.pr.outputs.number }}
+          SHA: ${{ steps.pr.outputs.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # Layer 0 (see the `claude-code-action-review-gate` skill): an UNSET
+          # secret interpolates to the empty string, so this is how the gate
+          # learns the reviewer cannot run at all. Measured 2026-10-23: this
+          # repo has no Actions secrets, so until Tom adds one the gate would
+          # otherwise be a permanent red X with no remedy available to anyone
+          # but him -- exactly the workload transfer option (a) was chosen to
+          # avoid. `pending` instead: visibly not-green, not a false pass, and
+          # it names the owner and the remedy.
+          REVIEWER_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          publish() {
+            gh api -X POST "repos/${REPO}/statuses/${SHA}" \
+              -f state="$1" \
+              -f context="dispatch/require-review" \
+              -f description="$2" \
+              -f target_url="${RUN_URL}" >/dev/null
+            printf 'dispatch/require-review = %s: %s\n' "$1" "$2"
+          }
+
+          if [ -z "${REVIEWER_TOKEN}" ]; then
+            publish pending \
+              "Not provisioned: add the CLAUDE_CODE_OAUTH_TOKEN repo secret to enable the reviewer, then re-gate this PR."
+            exit 0
+          fi
+
+          # `--paginate` without `--jq` emits one JSON array PER PAGE, which is
+          # not a single document. `--jq '.[]'` streams the objects and `jq -s`
+          # reassembles them into one array, so this is page-count-independent.
+          gh api "repos/${REPO}/issues/${NUMBER}/comments" --paginate --jq '.[]' | jq -s '.' > comments.json
+          gh api "repos/${REPO}/pulls/${NUMBER}/reviews"   --paginate --jq '.[]' | jq -s '.' > reviews.json
+          gh api "repos/${REPO}/pulls/${NUMBER}" > pr.json
+          gh api "repos/${REPO}/commits/${SHA}" > head.json
+
+          # `--slurpfile`, not `--argjson "$(cat ...)"`: a PR body or a review
+          # comment can be long, and routing the whole document through argv
+          # puts it under ARG_MAX and through another layer of shell quoting
+          # for no gain. Each `$name` is an ARRAY of the file's documents,
+          # hence `[0]`.
+          jq -n \
+            --slurpfile pr       pr.json \
+            --slurpfile head     head.json \
+            --slurpfile comments comments.json \
+            --slurpfile reviews  reviews.json \
+            '{ number: $pr[0].number,
+               author: $pr[0].user.login,
+               title:  $pr[0].title,
+               head_committed_at: $head[0].commit.committer.date,
+               bot_logins: ["claude[bot]"],
+               comments: $comments[0],
+               reviews: $reviews[0] }' > gate-input.json
+
+          verdict="$(jq -f .github/review-gate.jq gate-input.json)"
+          publish "$(printf '%s' "$verdict" | jq -r .state)" \
+                  "$(printf '%s' "$verdict" | jq -r .description)"
