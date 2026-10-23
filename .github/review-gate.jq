@@ -38,36 +38,84 @@ def is_fresh($head):
 
 # Whether a review-bot comment represents a review that actually HAPPENED.
 #
-# The rule is "no outstanding checklist items", and it is intentionally
-# different from review_gate.py's rule (which rejects a comment only when it
-# BOTH carries the errored-run marker AND has unticked boxes).
+# THE FIRST VERSION OF THIS RULE WAS "no outstanding `- [ ]` items", and it was
+# wrong in the one direction that matters. That rule only rejects a non-review
+# if the non-review carries an UNTICKED BOX -- and the two comment shapes
+# `claude-code-action` emits when it has reviewed nothing carry no checklist at
+# all, so both sailed through as reviews. Measured, not reasoned:
 #
-# `track_progress: true` makes the action post its progress checklist as a
-# comment the moment the run starts, then edit it in place as it works. Under
-# the upstream rule that comment counts as a review on arrival -- so the gate
-# goes green because the reviewer *started*, which is the exact failure #35
-# describes ("its absence from a later head renders identically to a pass").
-# Keying on the checkboxes instead covers that case and both errored-run cases
-# together, in one predicate:
+#   The in-flight comment, from the pinned action's own source at
+#   1d6de8c (`src/github/operations/comments/common.ts`, `createCommentBody`).
+#   `track_progress: true` forces tag mode, which posts this at PREPARE time,
+#   before any review work happens:
 #
-#   mid-flight tracking comment   has `- [ ]`  -> not a review  (upstream: IS)
-#   completed tracking comment    all `- [x]`  -> a review
-#   plain summary comment         no checklist -> a review
-#   errored run, died at 1 of 10  has `- [ ]`  -> not a review
-#   errored run, finished list    all `- [x]`  -> a review      (keeps #560)
+#       Claude Code is working… <img .../>
 #
-# The cost is that the gate's green depends on a comment EDIT, which is why
+#       I'll analyze this and get back to you.
+#
+#       [View job run](...)
+#
+#   The errored-run comment, from four real fleet comments measured
+#   2026-10-23 -- homelab#350 (three consecutive runs) and homelab#351:
+#
+#       **Claude encountered an error** —— [View job](...)
+#
+#   Neither has a `- [x]` or a `- [ ]`. Under the old rule the gate published
+#   `success` seconds after the reviewer spawned, and `homelab#350` is
+#   literally a green gate built out of three error messages. That is
+#   metaframework#687 -- "18 PRs passed the gate with zero reviews" -- which
+#   this file would have reintroduced in a new repo.
+#
+# So the rule has two parts. An outstanding box still disqualifies anything.
+# On top of that, a comment that IS one of the action's own status comments
+# must say it finished, or carry a completed checklist:
+#
+#   shape                                        verdict  why
+#   in-flight "Claude Code is working…"          no       no checklist, not finished
+#   errored, no checklist (homelab#350)          no       no checklist, not finished
+#   errored, partial checklist (itguy#207)       no       outstanding box
+#   errored, completed checklist                 YES      keeps metaframework#560
+#   "**Claude finished ... in 3m 48s**"          YES      finished (sandy#175)
+#   plain summary posted via `gh pr comment`     YES      not a status comment
+#   prose quoting `- [ ] ` mid-sentence          YES      marker is line-anchored
+#
+# The errored-but-completed row is deliberate and is NOT laxness: #560 found
+# that an `error_max_turns` run has read the diff and posted its findings
+# before blowing its budget, and three substantive fleet reviews carry the
+# error marker. Rejecting those would silently reverse a measured decision.
+#
+# One consequence of all this: the gate's green arrives on a comment EDIT (the
+# in-flight comment is edited into the "finished" one), which is why
 # `require-review.yml` listens for `issue_comment: [created, edited]` and
-# scores comments on `updated_at`. A gate on `created` alone could never see
-# the boxes get ticked.
+# scores comments on `updated_at`. On `created` alone the gate could never see
+# a run finish.
+
+# The action's own status comments, identified by their leading status line.
+# `^\*{0,2}` because the in-flight line is unbolded and the other two are
+# bolded, and `encountered an error` is matched as a PREFIX so it covers both
+# `**Claude encountered an error**` and `**Claude encountered an error after
+# 2m 10s**` (itguy#207's shape).
+def is_action_status:
+  test("^\\*{0,2}Claude (Code is working|finished|encountered an error)");
+
+def says_finished: test("^\\*{0,2}Claude finished");
+
+# `(^|\n)` rather than `\n` alone: a body whose very first bytes are a
+# checklist item has no preceding newline. No real shape measured here starts
+# that way, but the anchor costs nothing and the alternative is a rule that
+# silently stops applying to a shape nobody has seen yet.
+def has_outstanding_item: test("(^|\n)- \\[ \\] ");
+def has_completed_item:   test("(^|\n)- \\[x\\] ");
+
 def counts_as_review:
   (. != null)
   and (. != "")
-  # Literal markdown task-list item at the start of a line, matching
-  # review_gate.py's `_TODO_STEP`. Anchored to a newline on purpose: a review
-  # that *discusses* checklists in prose should not be thrown away for quoting
-  # the marker mid-sentence.
-  and (test("\n- \\[ \\] ") | not);
+  # Line-anchored on purpose: a review that *discusses* checklists in prose
+  # should not be thrown away for quoting the marker mid-sentence.
+  and (has_outstanding_item | not)
+  and (if is_action_status
+       then (says_finished or has_completed_item)
+       else true end);
 
 def truncate140:
   if length > 140 then (.[0:137] + "...") else . end;
@@ -75,18 +123,32 @@ def truncate140:
 def pass($why): { state: "success", description: ($why | truncate140) };
 def fail($why): { state: "failure", description: ($why | truncate140) };
 
-# Exemptions mirror the `if:` condition in `claude-code-review.yml` EXACTLY,
-# and that coupling is the point rather than an inherited nicety: the reviewer
-# declines to review a Dependabot PR and a `chore`-titled PR, so a gate that
-# demanded a review on those would be asking for something nothing in this
-# repo will ever produce -- a permanent red X with no available remedy. Change
-# one list and you must change the other; `__tests__/review-gate.spec.ts`
-# parses both files and asserts they agree.
+# The ONE exemption, and it is on the AUTHOR, never on a title prefix.
+#
+# The reviewer's `if:` declines two kinds of PR: Dependabot's, and any whose
+# title starts with `chore`. The obvious move is to exempt both here so the
+# gate never demands a review the reviewer declines to perform. The first is
+# right; the second is not, and `review_gate.py` says why in its own comment on
+# `EXEMPT_PR_AUTHORS` -- the title-prefix heuristic is the bug that constant
+# replaced. It over-matches (a human `chore:` PR goes unreviewed) and
+# under-matches (a hand-retitled Dependabot PR gets gated again). In a gate
+# whose whole purpose is backpressure on AGENT PRs, a title prefix is a
+# one-word self-service bypass: any agent can title its PR `chore:` and never
+# face a reviewer.
+#
+# Leaving `chore` out does not create the unremediable red X that argument
+# was about, because this gate HAS a remedy that works without Tom: a
+# `/review` comment runs the reviewer and re-publishes this status (see the
+# refusal message below). So a `chore` PR reads red until someone asks for a
+# review, which is backpressure rather than a dead end.
+#
+# `__tests__/review-gate.spec.ts` asserts the AUTHOR lists agree between the
+# two files, and asserts the reviewer's title-prefix list is exactly `chore` --
+# so adding a `docs` prefix over there is red here, rather than silently
+# creating the dead end this paragraph says cannot happen.
 def exempt_reason:
   if .author == "dependabot[bot]"
   then "Review not required: Dependabot PR -- the reviewer skips these by design."
-  elif (.title // "" | startswith("chore"))
-  then "Review not required: chore PR -- the reviewer skips these by design."
   else null end;
 
 # `index`, not `inside`/`contains`: on arrays those two do SUBSTRING matching
@@ -138,14 +200,30 @@ def candidates($bots):
     | ($all | map(select(.ts | is_fresh($head)))) as $fresh
     | if ($fresh | length) > 0 then pass($fresh[0].why)
       elif ($all | length) > 0 then
-        # Distinct from the no-review-at-all message because the remedies
-        # differ, and naming the wrong one sends the reader somewhere useless.
-        # `gh pr close && gh pr reopen`, NOT a `/review` comment: a check-run
-        # and a commit status both attach to the SHA of their triggering event,
-        # so an `issue_comment` run grades the default branch and never moves
-        # the PR head's verdict (metaframework#620).
-        fail("Re-gate: gh pr close \($pr.number // 0) && gh pr reopen \($pr.number // 0) -- newest review (\(($all | map(.ts) | max) // "?")) predates head (\($head // "?"))")
+        # Two refusals, because the two have different causes and the
+        # description is published as the commit-status text -- the
+        # highest-traffic instruction site in the gate. Collapsing them sends
+        # the reader to the wrong fix.
+        #
+        # BOTH NAME `/review`, and the first draft of this file said `/review`
+        # could not work, citing metaframework#620. That citation was misread.
+        # #620 is about a CHECK-RUN: a check-run attaches to the SHA of its own
+        # event, so an `issue_comment` run's check lands on the default branch
+        # and never marks the PR head reviewed. A COMMIT STATUS attaches to
+        # whatever SHA you POST it to, and `require-review.yml` resolves the PR
+        # head and posts there from every trigger -- which is the entire reason
+        # this gate is a status and not a check. So in this repo the `/review`
+        # chain closes: the comment fires the reviewer, the reviewer posts as
+        # `claude[bot]`, that comment fires this workflow, and the status on
+        # the head flips. metaframework's own `require-code-review.yml` calls
+        # `/review` "the remedy the gate's own staleness message instructs
+        # agents to use", for the same reason.
+        #
+        # `gh pr close && reopen` also works and is the heavier option; it is
+        # what you need if you want the `claude-review` CHECK-RUN on the head
+        # too, which `/review` cannot give you.
+        fail("Reviews on this PR all predate its head commit (newest \(($all | map(.ts) | max) // "?") vs head \($head // "?")). Comment /review to re-review this head.")
       else
-        fail("No code review on this PR head. Run the reviewer, then re-gate with: gh pr close N && gh pr reopen N")
+        fail("No code review for this head. Comment /review on PR #\($pr.number // 0) to run the reviewer -- it re-publishes this status.")
       end
   end

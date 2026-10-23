@@ -43,10 +43,20 @@ jobs:
   claude-review:
     # Run when a PR is opened/reopened by a non-Dependabot author with a
     # non-`chore` title, or when a comment explicitly asks for a review.
-    # Cross-repository (fork) PRs are excluded: Actions cannot post inline
-    # comments back to the base repo from a fork (a GitHub security boundary),
-    # so the reviewer would burn its turn budget being denied and exit having
-    # posted nothing. `require-review.yml` skips them for the matching reason.
+    # Cross-repository (fork) PRs are excluded from the `pull_request` path:
+    # Actions cannot post inline comments back to the base repo from a fork (a
+    # GitHub security boundary), so the reviewer would burn its turn budget
+    # being denied and exit having posted nothing.
+    #
+    # THE `issue_comment` PATH BELOW HAS NO SUCH CHECK, and cannot: the
+    # `issues` payload carries no head-repo field, and a job-level `if:` cannot
+    # make an API call. So `require-review.yml` -- which resolves the head repo
+    # via `gh api` in a step -- screens all of its triggers and this one does
+    # not. That asymmetry is safe rather than merely tolerated: the action runs
+    # `checkWritePermissions` before it posts anything, so only an actor with
+    # write access can get a `/review` on a fork PR as far as a checkout. It is
+    # called out because an earlier draft of this comment claimed symmetry with
+    # the other half, and that claim was false.
     #
     # THE DISCRIMINATOR IS `head.repo.full_name`, NOT `head.repo.fork`, and in
     # this repo that distinction is the difference between a gate and a no-op.

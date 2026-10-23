@@ -238,29 +238,51 @@ describe('review-gate.jq — staleness', () => {
   });
 
   /**
-   * The two refusals have DIFFERENT remedies -- run the reviewer vs. re-gate
-   * the existing one -- and the description is published as the commit-status
-   * text, which makes it the highest-traffic instruction site in the gate.
-   * Collapsing them sends the reader to the wrong fix.
+   * The two refusals have DIFFERENT causes -- no review at all, versus a
+   * review that predates this head -- and the description is published as the
+   * commit-status text, which makes it the highest-traffic instruction site in
+   * the gate. Collapsing them tells the reader the wrong story.
    */
-  it('names the re-gate remedy, not the run-the-reviewer one', () => {
-    const v = decide({ comments: [botComment('Reviewed.', BEFORE_HEAD)] });
-    expect(v.description).toMatch(/gh pr close 7 && gh pr reopen 7/);
-    expect(v.description).not.toMatch(/No code review/);
+  it('distinguishes a stale review from no review at all', () => {
+    const stale = decide({ comments: [botComment(SHAPES.finished, BEFORE_HEAD)] });
+    const none = decide({});
+    expect(stale.description).toMatch(/predate/i);
+    expect(none.description).toMatch(/No code review/i);
+    expect(stale.description).not.toBe(none.description);
   });
 
   /**
-   * `/review` is NOT the remedy and must not be suggested. A check-run and a
-   * commit status both attach to the SHA of their triggering event, so an
-   * `issue_comment` run grades the default branch and never moves the PR
-   * head's verdict (metaframework#620). Pinned because the earlier, wrong
-   * advice is the natural thing to write here.
+   * BOTH refusals name `/review`, and the first draft of this file asserted
+   * the opposite -- that `/review` could not be the remedy, citing
+   * metaframework#620.
+   *
+   * That citation was misread, and the distinction is the reason this gate is
+   * a commit status rather than a check-run. #620 is about a CHECK-RUN, which
+   * attaches to the SHA of its own triggering event: an `issue_comment` run's
+   * check lands on the default branch and never marks the PR head reviewed. A
+   * COMMIT STATUS attaches to whatever SHA you POST it to, and
+   * `require-review.yml` resolves the PR head and posts there from every
+   * trigger. So the `/review` chain closes here: the comment fires the
+   * reviewer, the reviewer posts as `claude[bot]`, that comment fires the
+   * status workflow, and the head's status flips. metaframework's own
+   * `require-code-review.yml` calls `/review` "the remedy the gate's own
+   * staleness message instructs agents to use", for exactly this reason.
+   *
+   * This matters beyond the wording: it is the whole reason the gate can drop
+   * the `chore`-title exemption without creating a dead end.
    */
-  it('does not offer /review as the remedy in either refusal', () => {
-    expect(decide({ comments: [botComment('Reviewed.', BEFORE_HEAD)] }).description).not.toMatch(
+  it('offers /review as the remedy in both refusals', () => {
+    expect(decide({ comments: [botComment(SHAPES.finished, BEFORE_HEAD)] }).description).toMatch(
       /\/review/
     );
-    expect(decide({}).description).not.toMatch(/\/review/);
+    expect(decide({}).description).toMatch(/\/review/);
+  });
+
+  /** The remedy should name the PR it applies to, not a placeholder `N`. */
+  it('interpolates the real PR number into the no-review remedy', () => {
+    const v = decide({ number: 4242 });
+    expect(v.description).toContain('4242');
+    expect(v.description).not.toMatch(/PR #N\b/);
   });
 
   it('passes when a stale review is accompanied by a fresh one', () => {
@@ -271,64 +293,159 @@ describe('review-gate.jq — staleness', () => {
   });
 });
 
+/**
+ * Verbatim bodies, not paraphrases. This is the correction that matters most
+ * in this file.
+ *
+ * The first version of this block hand-wrote its fixtures
+ * (`'Working on it\n- [x] Read the diff\n- [ ] Post findings'`) and every one
+ * of them carried an unticked box -- so the whole family only ever exercised
+ * the shapes the rule already handled. Three mutation rounds came back
+ * all-killed against it while the shipped predicate passed BOTH comment
+ * shapes the action emits when it has reviewed nothing. A fixture set that
+ * contains only the handled shapes cannot find an unhandled one, and mutation
+ * inherits that blindness exactly.
+ *
+ * Shapes 1 and 2 are the ones that were wrong. Provenance for each:
+ *
+ *   1  the pinned action's own source at 1d6de8c --
+ *      src/github/operations/comments/common.ts, createCommentBody()
+ *   2  homelab#350 (three consecutive runs) and homelab#351, measured
+ *      2026-10-23; metaframework#687 is the same body passing the same gate
+ *   3  itguy#207, first comment
+ *   4  the metaframework#560 shape: errored, checklist finished anyway
+ *   5  sandy#175, the finished tracking comment
+ *   6  sandy#175, the separate summary posted via `gh pr comment`
+ */
+const SHAPES = {
+  inflight:
+    'Claude Code is working\u2026 <img src="https://github.com/user-attachments/assets/5ac.png" width="14px" />\n\nI\'ll analyze this and get back to you.\n\n[View job run](https://github.com/tclancy/bluelinky/actions/runs/1)',
+  erroredNoChecklist:
+    "**Claude encountered an error** \u2014\u2014 [View job](https://github.com/tclancy/homelab/actions/runs/2)\n\n---\nI'll analyze this and get back to you.",
+  erroredPartialChecklist:
+    '**Claude encountered an error after 2m 10s** \u2014\u2014 [View job](https://x)\n\n- [x] Read the diff\n- [ ] Post findings',
+  erroredFinishedChecklist:
+    '**Claude encountered an error after 9m 1s** \u2014\u2014 [View job](https://x)\n\n- [x] Read the diff\n- [x] Post findings',
+  finished:
+    "**Claude finished @metaframework-dispatch-bot[bot]'s task in 3m 48s** \u2014\u2014 [View job](https://x)\n\n- [x] Read the diff\n- [x] Post findings",
+  plainSummary:
+    '### Review: sandy#175 (GIT_* env scrub for repo hygiene tests)\n\nI read the diff and have two notes, neither blocking.',
+};
+
 describe('review-gate.jq — a run that started is not a review', () => {
   /**
-   * The case this gate exists for, and the one place it is deliberately
-   * STRICTER than metaframework's `review_gate.py`.
-   *
-   * `track_progress: true` posts the progress checklist as a comment the
-   * moment the run starts and edits it in place while it works. Upstream's
-   * rule rejects a bot comment only when it both carries the errored-run
-   * marker AND has unticked boxes, so a mid-flight checklist counts as a
-   * review on arrival -- the gate goes green because the reviewer STARTED.
-   * That is the failure #35 describes in its own words.
+   * THE REGRESSION THIS GATE EXISTS TO NOT HAVE. `track_progress: true` forces
+   * tag mode, which posts this comment at prepare time -- before any review
+   * work -- and it carries no checklist at all. A rule keyed only on
+   * outstanding checkboxes publishes `success` seconds after the reviewer
+   * spawns, and if the run then dies without editing the comment nothing
+   * re-fires and the green is permanent.
    */
-  it('fails on a tracking comment with outstanding checklist items', () => {
-    const v = decide({
-      comments: [botComment('Working on it\n- [x] Read the diff\n- [ ] Post findings')],
-    });
+  it("fails on the action's in-flight comment, which has no checklist at all", () => {
+    const v = decide({ comments: [botComment(SHAPES.inflight)] });
     expect(v.state).toBe('failure');
-    expect(v.description).toMatch(/No code review/);
   });
 
-  it('passes once every checklist item is ticked', () => {
-    const v = decide({
-      comments: [botComment('Done\n- [x] Read the diff\n- [x] Post findings')],
-    });
-    expect(v.state).toBe('success');
+  /**
+   * metaframework#687 by its own name: "review_gate counts 'Claude
+   * encountered an error' as a code review -- 18 PRs passed the gate with
+   * zero reviews". homelab#350 carries three of these in a row, which is a
+   * green gate built out of three error messages.
+   */
+  it('fails on an errored run that posted no checklist', () => {
+    const v = decide({ comments: [botComment(SHAPES.erroredNoChecklist)] });
+    expect(v.state).toBe('failure');
   });
 
   it('fails on an errored run that died partway through its checklist', () => {
-    const v = decide({
-      comments: [
-        botComment('Claude encountered an error\n- [x] Read the diff\n- [ ] Post findings'),
-      ],
-    });
+    const v = decide({ comments: [botComment(SHAPES.erroredPartialChecklist)] });
     expect(v.state).toBe('failure');
   });
 
   /**
-   * Keeps metaframework#560: an `error_max_turns` run that read the diff and
-   * posted findings before blowing its budget IS a review. Three substantive
-   * reviews on the fleet carry the error marker.
+   * Keeps metaframework#560: an `error_max_turns` run has read the diff and
+   * posted its findings before blowing its budget, and three substantive
+   * fleet reviews carry the error marker. Rejecting these would silently
+   * reverse a measured decision.
    */
   it('passes an errored run that finished its checklist anyway', () => {
+    const v = decide({ comments: [botComment(SHAPES.erroredFinishedChecklist)] });
+    expect(v.state).toBe('success');
+  });
+
+  it('passes the finished tracking comment', () => {
+    const v = decide({ comments: [botComment(SHAPES.finished)] });
+    expect(v.state).toBe('success');
+  });
+
+  it('passes a plain summary comment that carries no checklist at all', () => {
+    const v = decide({ comments: [botComment(SHAPES.plainSummary)] });
+    expect(v.state).toBe('success');
+  });
+
+  /**
+   * The discriminator between shapes 2 and 6 is the leading status line, not
+   * the absence of a checklist -- both lack one. This is the control proving
+   * that: same missing checklist, opposite verdicts.
+   */
+  it('control: shapes 2 and 6 both lack a checklist and are graded oppositely', () => {
+    expect(SHAPES.erroredNoChecklist).not.toMatch(/\n- \[[x ]\] /);
+    expect(SHAPES.plainSummary).not.toMatch(/\n- \[[x ]\] /);
+    expect(decide({ comments: [botComment(SHAPES.erroredNoChecklist)] }).state).toBe('failure');
+    expect(decide({ comments: [botComment(SHAPES.plainSummary)] }).state).toBe('success');
+  });
+
+  /**
+   * Anchored to a line start, so a review that DISCUSSES an unticked checkbox
+   * in prose is not thrown away for quoting the marker.
+   */
+  /**
+   * The status-line match is anchored to the START of the body, and dropping
+   * that anchor survived a mutation round until this test existed.
+   *
+   * Unanchored, a genuine summary that happens to QUOTE one of the action's
+   * status lines mid-prose becomes a "status comment", and then fails for not
+   * saying "finished" -- so a real review is thrown away for discussing a
+   * failed run. Which is a thing reviews in this fleet actually do.
+   */
+  it('counts a summary that quotes an action status line mid-prose', () => {
     const v = decide({
       comments: [
-        botComment('Claude encountered an error\n- [x] Read the diff\n- [x] Post findings'),
+        botComment(
+          'I looked at the previous run: it posted `**Claude encountered an error**` and reviewed nothing. This head is fine.'
+        ),
       ],
     });
     expect(v.state).toBe('success');
+  });
+
+  it('counts a review that mentions "- [ ]" mid-sentence', () => {
+    const v = decide({
+      comments: [botComment('The README renders `- [ ] foo` oddly, but that is pre-existing.')],
+    });
+    expect(v.state).toBe('success');
+  });
+
+  it('rejects a body that is nothing but an outstanding checklist item', () => {
+    // `(^|\n)` rather than `\n` alone: no preceding newline at byte 0.
+    const v = decide({ comments: [botComment('- [ ] Post findings')] });
+    expect(v.state).toBe('failure');
+  });
+
+  it('does not count an empty comment body', () => {
+    const v = decide({ comments: [botComment('')] });
+    expect(v.state).toBe('failure');
   });
 
   /**
    * Pins `updated_at` as the timestamp that counts, against `created_at`.
    *
-   * Every other fixture here sets the two to the same value, which makes them
-   * an uncontested pair: a mutant swapping one for the other would pass the
-   * whole file. This is the case that separates them, and it is the normal
-   * shape of the self-heal path -- a tracking comment created before the
-   * current head and edited to completion after it.
+   * Every other fixture sets the two to the same value, which makes them an
+   * uncontested pair: a mutant swapping one for the other would pass the whole
+   * file. This is the normal shape of the self-heal path -- the in-flight
+   * comment is created before the current head and edited into the finished
+   * one after it. Real values from sandy#175: created 19:23:05, updated
+   * 19:27:08.
    */
   it('scores a bot comment on when it was last edited, not when it was created', () => {
     const v = decide({
@@ -337,46 +454,39 @@ describe('review-gate.jq — a run that started is not a review', () => {
           user: { login: REVIEW_BOT },
           created_at: BEFORE_HEAD,
           updated_at: AFTER_HEAD,
-          body: 'Done\n- [x] Read the diff\n- [x] Post findings',
+          body: SHAPES.finished,
         },
       ],
     });
     expect(v.state).toBe('success');
   });
-
-  it('passes a plain summary comment that carries no checklist at all', () => {
-    const v = decide({ comments: [botComment('Reviewed. Two notes inline, nothing blocking.')] });
-    expect(v.state).toBe('success');
-  });
-
-  /**
-   * Anchored to a line start, so a review that DISCUSSES an unticked checkbox
-   * in prose is not thrown away for quoting the marker.
-   */
-  it('counts a review that mentions "- [ ]" mid-sentence', () => {
-    const v = decide({
-      comments: [botComment('The README renders `- [ ] foo` oddly, but that is pre-existing.')],
-    });
-    expect(v.state).toBe('success');
-  });
-
-  it('does not count an empty comment body', () => {
-    const v = decide({ comments: [botComment('')] });
-    expect(v.state).toBe('failure');
-  });
 });
 
-describe('review-gate.jq — exemptions mirror the reviewer', () => {
+describe('review-gate.jq — the one exemption is on the author', () => {
   it('exempts a Dependabot PR', () => {
     const v = decide({ author: 'dependabot[bot]', title: 'bump got from 1 to 2' });
     expect(v.state).toBe('success');
     expect(v.description).toMatch(/not required/i);
   });
 
-  it('exempts a chore-titled PR', () => {
+  /**
+   * The gate deliberately does NOT exempt a `chore` title, even though the
+   * reviewer declines to auto-review one.
+   *
+   * `review_gate.py`'s comment on `EXEMPT_PR_AUTHORS` calls the title-prefix
+   * heuristic the bug that constant replaced: it over-matches (a human
+   * `chore:` PR goes unreviewed) and under-matches (a hand-retitled
+   * Dependabot PR gets gated again). In a gate whose purpose is backpressure
+   * on AGENT PRs, a title prefix is a one-word self-service bypass.
+   *
+   * It does not create an unremediable red X, because `/review` runs the
+   * reviewer and re-publishes this status without Tom -- which the refusal
+   * message says, and the test below pins.
+   */
+  it('does NOT exempt a chore-titled PR — that would be a one-word bypass', () => {
     const v = decide({ title: 'chore: bump the lockfile' });
-    expect(v.state).toBe('success');
-    expect(v.description).toMatch(/not required/i);
+    expect(v.state).toBe('failure');
+    expect(v.description).toMatch(/\/review/);
   });
 
   it('does not exempt a title that merely contains "chore"', () => {
@@ -385,22 +495,42 @@ describe('review-gate.jq — exemptions mirror the reviewer', () => {
   });
 
   /**
-   * THE COUPLING, and the reason it is asserted rather than trusted. The
-   * reviewer's `if:` declines Dependabot and `chore` PRs. If the gate did not
-   * exempt the same two, those PRs would demand a review that nothing in this
-   * repo will ever produce: a red X whose only remedy is Tom reviewing by
-   * hand. Each side is read out of its own file, so editing one without the
-   * other is red.
+   * THE COUPLING, asserted as SET EQUALITY in both directions, because the
+   * first version of this test was four presence checks and said "exactly" in
+   * its own name. Confirmed by mutation: adding
+   * `&& !startsWith(...title, 'docs')` to the reviewer's `if:` left all 56
+   * tests green, and a `docs:` PR would then get no auto-review while the gate
+   * demanded one.
+   *
+   * Two separate claims:
+   *   1. the AUTHOR exemptions must agree between the two files;
+   *   2. the reviewer's TITLE-prefix skips must be exactly {chore} -- because
+   *      the gate exempts no title at all, and every title the reviewer skips
+   *      is one whose only remedy is `/review`. Adding a prefix there is a
+   *      decision, so it should be red here rather than silent.
    */
-  it('exempts exactly the authors and titles the reviewer workflow skips', () => {
-    const reviewerIf = withoutComments(REVIEWER);
-    const gateSource = fs.readFileSync(GATE, 'utf8');
+  it('the reviewer skips exactly one title prefix, and the gate exempts none', () => {
+    const reviewer = withoutComments(REVIEWER);
+    const prefixes = [
+      ...reviewer.matchAll(/!startsWith\(github\.event\.pull_request\.title, '([^']+)'\)/g),
+    ].map(m => m[1]);
+    expect(new Set(prefixes)).toEqual(new Set(['chore']));
 
-    expect(reviewerIf).toContain("github.event.pull_request.user.login != 'dependabot[bot]'");
-    expect(gateSource).toContain('dependabot[bot]');
+    const gate = withoutComments(GATE);
+    expect(gate).not.toMatch(/startswith\("chore"\)/);
+    expect(gate).not.toMatch(/\.title/);
+  });
 
-    expect(reviewerIf).toContain("!startsWith(github.event.pull_request.title, 'chore')");
-    expect(gateSource).toContain('startswith("chore")');
+  it('the author exemptions agree between the two files', () => {
+    const reviewer = withoutComments(REVIEWER);
+    const authors = [
+      ...reviewer.matchAll(/github\.event\.pull_request\.user\.login != '([^']+)'/g),
+    ].map(m => m[1]);
+    expect(new Set(authors)).toEqual(new Set(['dependabot[bot]']));
+
+    const gate = withoutComments(GATE);
+    const gateAuthors = [...gate.matchAll(/\.author == "([^"]+)"/g)].map(m => m[1]);
+    expect(new Set(gateAuthors)).toEqual(new Set(authors));
   });
 });
 
@@ -503,9 +633,36 @@ describe('require-review.yml — the status half', () => {
    * and turn every outside contribution into a red workflow run -- worse than
    * no gate.
    */
-  it('skips cross-repository PRs', () => {
+  /**
+   * Asserted as the BRANCH BODIES IN ORDER, not as two presence checks.
+   *
+   * Confirmed by mutation: swapping the `fork=false` / `fork=true` bodies --
+   * so the gate skips every same-repo PR and publishes no status at all --
+   * left all 56 tests green under the presence-check version. That inversion
+   * is the single mutation that silently disables the whole gate, and this
+   * file's own prose calls it the failure that "renders exactly like a gate
+   * that passes everything". A swap breaks the adjacency below.
+   */
+  it('skips cross-repository PRs, and the branches are not invertible silently', () => {
     expect(text).toContain("steps.fork.outputs.fork != 'true'");
-    expect(text).toContain('head_repo" = "$REPO"');
+    expect(text).toMatch(
+      /if \[ "\$head_repo" = "\$REPO" \]; then\s*\n\s*fork=false\s*\n\s*else\s*\n\s*fork=true\s*\n\s*fi/
+    );
+  });
+
+  /**
+   * A gate that cannot be evaluated must not leave the previous verdict
+   * standing. Under `set -e` a failed `gh api` just kills the step, so no
+   * status is posted and the PR silently keeps whatever it had -- which on a
+   * re-evaluation of an approved-then-pushed PR is a stale GREEN.
+   */
+  it('publishes an error status rather than nothing when evaluation fails', () => {
+    // Line-anchored. `toMatch(/trap 'publish error/)` was satisfied by a
+    // DISABLED copy of the line -- prefixing `: ` turns the trap into a no-op
+    // argument to the null command and the substring still matches, so the
+    // mutant survived a round. The trap must be the first thing on its line.
+    expect(text).toMatch(/^\s*trap 'publish error/m);
+    expect(text).toMatch(/\bERR$/m);
   });
 
   /**
@@ -550,6 +707,94 @@ describe('require-review.yml — the status half', () => {
  * `claude-code-action-review-gate` skill's own template ships, so it is what
  * the next person copying a working example will reach for.
  */
+/**
+ * Syntax-checks every `run:` block in both workflows with `bash -n`.
+ *
+ * Earned its place immediately: an apostrophe in a YAML comment written INSIDE
+ * the single-quoted `jq` program closed the quote and left the rest of the
+ * step as one unterminated string. YAML still parsed, `check-yaml` passed, and
+ * nothing else in this repo reads a `run:` body -- the break would only have
+ * surfaced as a failing job after merge, on a workflow whose failure mode is
+ * "no status posted".
+ *
+ * The block reader is hand-rolled rather than using js-yaml, matching
+ * `pre-commit-config.spec.ts`: js-yaml is in node_modules only as an
+ * undeclared transitive dependency of eslint, so an eslint bump could remove
+ * it and break this test for an unrelated reason.
+ */
+function runBlocks(file: string): string[] {
+  const lines = fs.readFileSync(file, 'utf8').split('\n');
+  const blocks: string[] = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const match = lines[i].match(/^(\s*)run: \|\s*$/);
+    if (!match) continue;
+    const outer = match[1].length;
+    const body: string[] = [];
+    for (let j = i + 1; j < lines.length; j += 1) {
+      const indent = lines[j].search(/\S/);
+      if (lines[j].trim() === '') {
+        body.push('');
+        continue;
+      }
+      if (indent <= outer) break;
+      body.push(lines[j]);
+    }
+    blocks.push(body.join('\n'));
+  }
+  return blocks;
+}
+
+describe('every workflow run: block is valid shell', () => {
+  it.each([
+    ['claude-code-review.yml', REVIEWER],
+    ['require-review.yml', REQUIRE],
+  ])('%s', (_name, file) => {
+    const blocks = runBlocks(file);
+    // Reachability control: a reader that returned nothing would pass the
+    // loop below vacuously, which is the exact shape this file keeps warning
+    // about. Both workflows have at least two `run:` steps.
+    expect(blocks.length).toBeGreaterThanOrEqual(2);
+    for (const block of blocks) {
+      expect(block.trim().length).toBeGreaterThan(0);
+      // `bash -n` parses without executing. Throws on a syntax error, which
+      // jest reports as the failure.
+      execFileSync('bash', ['-n'], { input: block, encoding: 'utf8' });
+    }
+  });
+
+  it('control: bash -n really does reject a broken block', () => {
+    // Without this the loop above is indistinguishable from a no-op if the
+    // shell check ever stops throwing.
+    expect(() =>
+      execFileSync('bash', ['-n'], { input: "echo 'unterminated", encoding: 'utf8' })
+    ).toThrow();
+  });
+});
+
+describe('both workflows pin their third-party actions to a commit SHA', () => {
+  it.each([
+    ['claude-code-review.yml', REVIEWER, 2],
+    ['require-review.yml', REQUIRE, 1],
+  ])('%s', (_name, file, expected) => {
+    // `/^\s*-\s+uses: /m`, not `/uses: /`: the bare substring also matches
+    // `statuses: write` in require-review.yml's `permissions:` block, which
+    // made this test count two actions in a file that has one -- a presence
+    // check reading a permission as a pinned action.
+    const uses = withoutComments(file).match(/^\s*(?:-\s+)?uses: \S+/gm) ?? [];
+    expect(uses.length).toBe(expected);
+    for (const u of uses) {
+      expect(u).toMatch(/@[0-9a-f]{40}$/);
+    }
+  });
+
+  it('control: the uses: matcher does not read a permission as an action', () => {
+    // `statuses: write` contains the literal `uses: `. The first version of
+    // the matcher above was `/uses: \S+/` and counted it as a second pinned
+    // action in a file that has one.
+    expect('      statuses: write'.match(/^\s*(?:-\s+)?uses: \S+/gm)).toBeNull();
+  });
+});
+
 describe('neither half keys the skip on head.repo.fork', () => {
   it.each([
     ['claude-code-review.yml', REVIEWER],
@@ -660,18 +905,5 @@ describe('claude-code-review.yml — the five config layers', () => {
   /** Actions cannot post inline comments back to the base repo from a fork. */
   it('skips cross-repository PRs, as the status half does', () => {
     expect(text).toContain('github.event.pull_request.head.repo.full_name == github.repository');
-  });
-
-  /**
-   * An action pinned to a moving tag is a supply-chain surface; the fleet pins
-   * every third-party action to a commit SHA.
-   */
-  it('pins both third-party actions to a commit SHA', () => {
-    const uses = text.match(/uses: [^\s]+/g) ?? [];
-    const thirdParty = uses.filter(u => !u.includes('./'));
-    expect(thirdParty.length).toBeGreaterThanOrEqual(2);
-    for (const u of thirdParty) {
-      expect(u).toMatch(/@[0-9a-f]{40}$/);
-    }
   });
 });

@@ -183,6 +183,15 @@ jobs:
             exit 0
           fi
 
+          # Publish `error` rather than nothing if anything below blows up.
+          # Without this the step just dies under `set -e` and NO status is
+          # posted -- so the PR silently keeps whatever status it already had,
+          # which on a re-evaluation of an approved-then-pushed PR is a stale
+          # GREEN. A gate's failure mode must not be "leave the last verdict
+          # standing". `trap` fires on the non-zero exit; `publish` is defined
+          # above it, and the `|| true` keeps a failing publish from recursing.
+          trap 'publish error "Gate could not be evaluated - see the run log. This is a gate failure, not a review verdict." || true' ERR
+
           # `--paginate` without `--jq` emits one JSON array PER PAGE, which is
           # not a single document. `--jq '.[]'` streams the objects and `jq -s`
           # reassembles them into one array, so this is page-count-independent.
@@ -204,6 +213,15 @@ jobs:
             '{ number: $pr[0].number,
                author: $pr[0].user.login,
                title:  $pr[0].title,
+               # The committer date of the HEAD commit. `review_gate.py` instead
+               # takes `max()` over every commit in `pulls/N/commits`, to
+               # drop the assumption that the head is the newest -- so this is
+               # NOT parity with it, and the difference is real if a push
+               # lands commits out of date order (rebase, cherry-pick). The
+               # trade is deliberate: `commits/{SHA}` is exact for the SHA the
+               # status is posted to and has no 250-commit page cap, where the
+               # list endpoint has both. If a reviewed-then-reordered PR ever
+               # reads fresh here, this line is why.
                head_committed_at: $head[0].commit.committer.date,
                bot_logins: ["claude[bot]"],
                comments: $comments[0],
