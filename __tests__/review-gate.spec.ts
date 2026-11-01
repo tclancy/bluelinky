@@ -58,6 +58,16 @@ const TOKEN_SECRET = 'CLAUDE_CODE_OAUTH_TOKEN';
 /** The login the reviewer posts under, and the only one the gate trusts. */
 const REVIEW_BOT = 'claude[bot]';
 
+/**
+ * The only login whose FORMAL review satisfies the gate.
+ *
+ * A separate list from `REVIEW_BOT` on purpose, and the separation is the fix
+ * for the false green below: a review BOT satisfies the gate by posting a
+ * comment, a HUMAN satisfies it by submitting a formal verdict. Merging the
+ * two lists would let `claude[bot]` approve the PRs it is supposed to review.
+ */
+const REVIEWER_HUMAN = 'tclancy';
+
 const HEAD_AT = '2026-10-23T03:00:00Z';
 const AFTER_HEAD = '2026-10-23T03:05:00Z';
 const BEFORE_HEAD = '2026-10-22T03:05:00Z';
@@ -73,6 +83,7 @@ interface GateInput {
   author?: string;
   title?: string;
   bot_logins?: string[];
+  reviewer_logins?: string[];
   comments?: unknown[];
   reviews?: unknown[];
 }
@@ -106,7 +117,7 @@ function botComment(body: string, updatedAt: string | null = AFTER_HEAD, login =
   return { user: { login }, created_at: updatedAt, updated_at: updatedAt, body };
 }
 
-function review(state: string, submittedAt: string | null = AFTER_HEAD, login = 'tclancy') {
+function review(state: string, submittedAt: string | null = AFTER_HEAD, login = REVIEWER_HUMAN) {
   return { user: { login }, state, submitted_at: submittedAt };
 }
 
@@ -229,6 +240,135 @@ describe('review-gate.jq — when a review exists for this head', () => {
       comments: [botComment('Reviewed.', BEFORE_HEAD)],
     });
     expect(v.state).toBe('success');
+  });
+});
+
+/**
+ * THE FALSE GREEN, and the regression guard for it.
+ *
+ * `candidates` has two arms. The COMMENT arm has filtered on `is_bot($bots)`
+ * since the first draft of this file; the FORMAL-REVIEW arm shipped with no
+ * author filter at all. The two read as symmetrical and were not — found
+ * reviewing the port of this file into `parsons-remote` (PR #26) on
+ * 2026-11-01, and reproduced against the real program before any fix:
+ *
+ *   reviews: [{user: {login: 'random-passerby'}, state: 'CHANGES_REQUESTED'}]
+ *     -> {"state":"success", ...}
+ *
+ * `tclancy/bluelinky` is PUBLIC. Any authenticated GitHub account can submit
+ * a review on an open PR, and `CHANGES_REQUESTED` needs no write access, so
+ * before this fix the gate could be cleared by a stranger who read nothing —
+ * and, worse for the gate's actual threat model, by one fleet bot approving
+ * another fleet bot's PR, which GitHub permits.
+ *
+ * Every pre-existing formal-review test used `tclancy` as the login (that was
+ * the helper's default), which is exactly why three all-killed mutation rounds
+ * and 56 green tests never saw it. The fixtures were the defect, again.
+ */
+describe('review-gate.jq — a formal review only counts from an allow-listed login', () => {
+  it('rejects CHANGES_REQUESTED from an account nobody allow-listed', () => {
+    const v = decide({ reviews: [review('CHANGES_REQUESTED', AFTER_HEAD, 'random-passerby')] });
+    expect(v.state).toBe('failure');
+  });
+
+  it('rejects APPROVED from an account nobody allow-listed', () => {
+    const v = decide({ reviews: [review('APPROVED', AFTER_HEAD, 'random-passerby')] });
+    expect(v.state).toBe('failure');
+  });
+
+  /**
+   * The case the gate exists for. GitHub lets one App approve another App's
+   * PR, and this fleet runs two bots that open PRs in this repo.
+   */
+  it("rejects one fleet bot approving another fleet bot's PR", () => {
+    const v = decide({
+      author: 'dispatch-bot[bot]',
+      reviews: [review('APPROVED', AFTER_HEAD, 'metaframework-dispatch-bot[bot]')],
+    });
+    expect(v.state).toBe('failure');
+  });
+
+  /**
+   * Control, in both directions: the fixtures above differ from the passing
+   * one ONLY in the login. Without this an unrelated change to `review()` —
+   * a wrong state string, a stale timestamp — would make the three tests above
+   * pass for a reason that has nothing to do with the allow-list.
+   */
+  it('control: the identical review from the allow-listed login passes', () => {
+    const v = decide({ reviews: [review('APPROVED', AFTER_HEAD, REVIEWER_HUMAN)] });
+    expect(v.state).toBe('success');
+    expect(v.description).toContain(REVIEWER_HUMAN);
+  });
+
+  /**
+   * The same `index` trap the comment arm is guarded against. `inside` /
+   * `contains` do SUBSTRING matching on array elements, so a prefix login
+   * would satisfy a naive spelling. Both arms now share `is_bot`, so this
+   * guards the sharing as much as the rule.
+   */
+  it('rejects a login that is merely a PREFIX of the allow-listed reviewer', () => {
+    const v = decide({ reviews: [review('APPROVED', AFTER_HEAD, 'tclan')] });
+    expect(v.state).toBe('failure');
+  });
+
+  it('rejects a login that merely CONTAINS the allow-listed reviewer', () => {
+    const v = decide({ reviews: [review('APPROVED', AFTER_HEAD, 'nottclancyatall')] });
+    expect(v.state).toBe('failure');
+  });
+
+  /**
+   * The two lists are not interchangeable, and this pins the direction of the
+   * separation rather than just its existence. The review bot satisfies the
+   * gate by COMMENTING; a formal verdict from it is not the same act and does
+   * not count. Merging the lists would let the reviewer approve the PRs it
+   * reviews.
+   */
+  it('does not let the review BOT satisfy the formal-review arm', () => {
+    const v = decide({ reviews: [review('APPROVED', AFTER_HEAD, REVIEW_BOT)] });
+    expect(v.state).toBe('failure');
+  });
+
+  it('control: that same bot DOES satisfy the gate by commenting', () => {
+    const v = decide({ comments: [botComment('Reviewed; nothing to flag.')] });
+    expect(v.state).toBe('success');
+  });
+
+  /**
+   * The allow-list is an INPUT with a default, not a hardcoded literal, so the
+   * default itself is worth driving — a `reviewer_logins` the workflow forgot
+   * to pass must still land on `["tclancy"]` rather than on `[]` (which would
+   * make the arm dead) or on everything (which is the bug above).
+   */
+  it('honours an explicitly supplied allow-list', () => {
+    const v = decide({
+      reviewer_logins: ['someone-else'],
+      reviews: [review('APPROVED', AFTER_HEAD, 'someone-else')],
+    });
+    expect(v.state).toBe('success');
+  });
+
+  it('falls back to the documented default when the field is absent', () => {
+    // `review()` defaults to the human below; the payload omits
+    // `reviewer_logins` entirely, so only the jq-side default can pass this.
+    const v = decide({ reviews: [review('APPROVED')] });
+    expect(v.state).toBe('success');
+    expect(v.description).toContain(REVIEWER_HUMAN);
+  });
+
+  /**
+   * An empty list must reject, not admit. `index($l)` against `[]` is null, so
+   * this is the same code path — but a future refactor to `any`/`all` can
+   * silently invert it (`all` over an empty list is TRUE in jq), which is the
+   * degenerate-value shape that turns a filter into a no-op.
+   */
+  it('rejects every formal review when the allow-list is empty', () => {
+    const v = decide({ reviewer_logins: [], reviews: [review('APPROVED')] });
+    expect(v.state).toBe('failure');
+  });
+
+  it('rejects a formal review whose user object is missing entirely', () => {
+    const v = decide({ reviews: [{ state: 'APPROVED', submitted_at: AFTER_HEAD }] });
+    expect(v.state).toBe('failure');
   });
 });
 
@@ -555,13 +695,33 @@ describe('review-gate.jq — the published description', () => {
     expect(untruncated.length).toBeGreaterThan(140);
   });
 
+  /**
+   * `reviewer_logins: [LONG_LOGIN]` is not decoration. Once the formal-review
+   * arm became allow-listed, this fixture stopped PRODUCING the long
+   * description at all -- the gate refused the review and returned the short
+   * "No code review for this head" instead. `never exceeds 140` then passed
+   * vacuously, which is the second time this pair has failed to fail. The
+   * control above is what keeps that visible: it grades the string the gate is
+   * supposed to be truncating.
+   */
+  const LONG_LOGIN_ALLOWED = { reviewer_logins: [LONG_LOGIN] };
+
   it('never exceeds 140 characters', () => {
-    const v = decide({ reviews: [review('APPROVED', AFTER_HEAD, LONG_LOGIN)] });
+    const v = decide({
+      ...LONG_LOGIN_ALLOWED,
+      reviews: [review('APPROVED', AFTER_HEAD, LONG_LOGIN)],
+    });
     expect(v.description.length).toBeLessThanOrEqual(140);
+    // Reachability: the untruncated form really was built, so the assertion
+    // above graded truncation rather than a refusal.
+    expect(v.state).toBe('success');
   });
 
   it('truncates with an ellipsis rather than silently cutting', () => {
-    const v = decide({ reviews: [review('APPROVED', AFTER_HEAD, LONG_LOGIN)] });
+    const v = decide({
+      ...LONG_LOGIN_ALLOWED,
+      reviews: [review('APPROVED', AFTER_HEAD, LONG_LOGIN)],
+    });
     expect(v.description.endsWith('...')).toBe(true);
   });
 
@@ -571,6 +731,30 @@ describe('review-gate.jq — the published description', () => {
     expect(v.description).toBe(`Review present: comment by ${REVIEW_BOT} at ${AFTER_HEAD}`);
   });
 });
+
+/**
+ * Read a `name: ["a", "b"]` list out of a file as the quoted strings it holds.
+ *
+ * Both obvious spellings are wrong on this file's real inputs, which is why
+ * this is one shared reader rather than a regex at each call site:
+ *
+ *   `\[([^\]]*)\]`      stops at the first `]` -- and `["claude[bot]"]` has
+ *                        one INSIDE the login, so it yields `claude[bot`.
+ *   `\[([\s\S]*?)\]\s*,` needs a comma after the bracket, which the jq-side
+ *                        spelling (`// ["tclancy"]) as $reviewers`) has not.
+ *
+ * So: find the key, take the rest of ITS line, span first `[` to last `]`, and
+ * read the quoted strings out of that. Every list this file asks about is on
+ * one line in both files.
+ */
+function parse(text: string, key: string): string[] {
+  const line = text.match(new RegExp(`${key}[^\\n]*`));
+  if (!line) return [];
+  const open = line[0].indexOf('[');
+  const close = line[0].lastIndexOf(']');
+  if (open === -1 || close <= open) return [];
+  return [...line[0].slice(open, close + 1).matchAll(/"([^"]*)"/g)].map(q => q[1]);
+}
 
 describe('require-review.yml — the status half', () => {
   const text = withoutComments(REQUIRE);
@@ -625,8 +809,106 @@ describe('require-review.yml — the status half', () => {
    */
   it('publishes pending, not failure, when the reviewer token is unset', () => {
     expect(text).toContain(`REVIEWER_TOKEN: \${{ secrets.${TOKEN_SECRET} }}`);
-    expect(text).toMatch(/if \[ -z "\$\{REVIEWER_TOKEN\}" \]/);
+    expect(text).toMatch(/if \[ "\$state" != "success" \] && \[ -z "\$\{REVIEWER_TOKEN\}" \]/);
     expect(text).toMatch(/publish pending/);
+  });
+
+  /**
+   * THE ORDERING, and it is a bug fix rather than tidying.
+   *
+   * The unprovisioned check used to be the FIRST thing in the step, which put
+   * it upstream of `exempt_reason` in `review-gate.jq`. Dependabot runs read a
+   * separate secret store, so `secrets.CLAUDE_CODE_OAUTH_TOKEN` interpolates
+   * EMPTY on a Dependabot event even once the Actions secret exists — and this
+   * repo's open PRs are mostly Dependabot's. Every one of them would have
+   * published `pending`, instructing Tom to add a secret that is already
+   * there, instead of the `success` its exemption grants it.
+   *
+   * Asserted as a POSITION, not a presence: both spellings contain the same
+   * lines, and only their order differs. The index comparison is what a
+   * presence check cannot make.
+   */
+  it('evaluates the gate BEFORE deciding the reviewer is unprovisioned', () => {
+    const gateRun = text.indexOf('jq -f .github/review-gate.jq');
+    const tokenCheck = text.search(
+      /if \[ "\$state" != "success" \] && \[ -z "\$\{REVIEWER_TOKEN\}" \]/
+    );
+    expect(gateRun).toBeGreaterThan(-1);
+    expect(tokenCheck).toBeGreaterThan(-1);
+    expect(tokenCheck).toBeGreaterThan(gateRun);
+  });
+
+  /**
+   * And the conjunct, separately, because the position alone does not say the
+   * exemption survives. With the check moved but left unconditional, a
+   * Dependabot event would evaluate the gate, get `success`, and then
+   * overwrite it with `pending` — the same wrong description one step later.
+   */
+  it('lets an exempt verdict through the unprovisioned check', () => {
+    expect(text).toMatch(
+      /if \[ "\$state" != "success" \] && \[ -z "\$\{REVIEWER_TOKEN\}" \]; then\s*\n\s*publish pending/
+    );
+    expect(text).toMatch(/publish "\$state" "\$description"/);
+  });
+
+  /**
+   * The formal-review arm's allow-list, wired from here — see the long note on
+   * `candidates` in `.github/review-gate.jq`.
+   */
+  it('passes a reviewer allow-list that is SEPARATE from the bot list', () => {
+    // The list body is read as QUOTED STRINGS, not as `[^\]]*`. A bracket
+    // class stops at the first `]` -- which in `["claude[bot]"]` is the one
+    // INSIDE the login -- so the naive reader yields `claude[bot` and the
+    // assertion fails for a reason that has nothing to do with the gate.
+    expect(parse(text, 'bot_logins')).toEqual([REVIEW_BOT]);
+    expect(parse(text, 'reviewer_logins')).toEqual([REVIEWER_HUMAN]);
+  });
+
+  /**
+   * THE COUPLING. The workflow passes the list and the jq file defaults it, so
+   * the two can disagree silently: a workflow that stopped passing the field
+   * would fall back to the jq default and still grade correctly, while a
+   * workflow passing a DIFFERENT list would grade differently from every test
+   * in this file (which drives the default). Pinned as equality so the drift
+   * is red rather than invisible.
+   */
+  it('the reviewer allow-list agrees with the jq default it falls back to', () => {
+    const fromWorkflow = parse(text, 'reviewer_logins');
+    const fromGate = parse(withoutComments(GATE), '\\$pr\\.reviewer_logins //');
+    expect(fromWorkflow.length).toBeGreaterThan(0);
+    expect(new Set(fromGate)).toEqual(new Set(fromWorkflow));
+  });
+
+  /**
+   * The ERR trap only covers the step it is declared in. If `Resolve PR number
+   * and head SHA` or the cross-repo step dies first — one `gh api` 5xx is
+   * enough — nothing publishes and the PR keeps whatever status it had, which
+   * on a re-evaluation of an approved-then-pushed PR is a stale GREEN. That is
+   * the trap's own failure mode arriving one step earlier than the trap can
+   * see it.
+   */
+  it('publishes an error status when a step BEFORE the gate dies', () => {
+    expect(text).toMatch(/^\s*if: failure\(\)$/m);
+    const guard = text.slice(text.search(/^\s*if: failure\(\)$/m));
+    expect(guard).toMatch(/state=error/);
+    // It must re-resolve the SHA itself: `steps.pr.outputs.sha` is empty
+    // precisely when the resolve step is what broke, so reading it would post
+    // to nowhere and the guard would be decorative.
+    expect(guard).not.toContain('steps.pr.outputs');
+    expect(guard).toMatch(/gh api "repos\/\$\{REPO\}\/pulls\/\$\{number\}" --jq \.head\.sha/);
+  });
+
+  /**
+   * Control for the two position assertions above: prove the reader can see a
+   * WRONG order, rather than only a right one. Without it, a matcher that
+   * silently found nothing would report both orderings as correct.
+   */
+  it('control: the ordering reader really does distinguish the two orders', () => {
+    const marker = /if \[ "\$state" != "success" \] && \[ -z "\$\{REVIEWER_TOKEN\}" \]/;
+    const inverted =
+      'if [ "$state" != "success" ] && [ -z "${REVIEWER_TOKEN}" ]\n' +
+      'jq -f .github/review-gate.jq gate-input.json\n';
+    expect(inverted.search(marker)).toBeLessThan(inverted.indexOf('jq -f .github/review-gate.jq'));
   });
 
   /**

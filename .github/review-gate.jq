@@ -16,6 +16,7 @@
 #     "author":            "<PR author login>",
 #     "title":             "<PR title>",
 #     "bot_logins":        ["claude[bot]"],
+#     "reviewer_logins":   ["tclancy"],
 #     "comments":          [ GitHub issue-comment objects ],
 #     "reviews":           [ GitHub review objects ]
 #   }
@@ -169,7 +170,7 @@ def exempt_reason:
 # needs no separate guard.
 def is_bot($bots): . as $l | ($bots | index($l)) != null;
 
-def candidates($bots):
+def candidates($bots; $reviewers):
   # Comments first, then formal reviews -- so a PR satisfied by a bot review
   # comment reports that rather than a formal review that happens to coexist.
   #
@@ -184,7 +185,33 @@ def candidates($bots):
       | select(.body | counts_as_review)
       | { ts: .updated_at,
           why: "Review present: comment by \(.user.login // "?") at \(.updated_at // "?")" } ),
+    # THE LOGIN FILTER ON THIS ARM IS LOAD-BEARING, AND IT WAS MISSING HERE.
+    # Found reviewing the port of this file into `parsons-remote` (PR #26) on
+    # 2026-11-01, then reproduced against this very program:
+    #
+    #   reviews: [{user: {login: "random-passerby"}, state: "CHANGES_REQUESTED"}]
+    #     -> {"state":"success","description":"Review present: formal ..."}
+    #
+    # This repo is PUBLIC, so any authenticated GitHub account can submit a
+    # review on an open PR -- and `CHANGES_REQUESTED` needs no write access at
+    # all. Worse for the gate's actual threat model, GitHub permits one fleet
+    # bot to approve another's PR, so `metaframework-dispatch-bot[bot]`
+    # approving a `dispatch-bot[bot]` PR satisfied it too. Both are the
+    # one-command self-service bypass this file rejects `chore:` titles for,
+    # three paragraphs below, while leaving the back door open.
+    #
+    # Note which side of the sibling arm had the bug. The COMMENT arm has
+    # filtered on `is_bot($bots)` since the first draft; the two arms read as
+    # symmetrical and were not. That asymmetry is what a port makes visible and
+    # what reading one arm cannot.
+    #
+    # `$reviewers`, not `$bots`, and the two lists must not be merged: a review
+    # BOT satisfies the gate by posting a COMMENT, a HUMAN satisfies it by
+    # submitting a FORMAL verdict. Defaulting to `["tclancy"]` keeps this arm
+    # the Tom-shaped escape hatch the workflow's own comment calls it ("it is
+    # how Tom satisfies it himself").
     ( .reviews[]?
+      | select(.user.login | is_bot($reviewers))
       | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED")
       | { ts: .submitted_at,
           why: "Review present: formal \(.state) by \(.user.login // "?") at \(.submitted_at // "?")" } )
@@ -192,11 +219,12 @@ def candidates($bots):
 
 . as $pr
 | ($pr.bot_logins // ["claude[bot]"]) as $bots
+| ($pr.reviewer_logins // ["tclancy"]) as $reviewers
 | $pr.head_committed_at as $head
 | ($pr | exempt_reason) as $exempt
 | if $exempt != null then pass($exempt)
   else
-    ($pr | candidates($bots)) as $all
+    ($pr | candidates($bots; $reviewers)) as $all
     | ($all | map(select(.ts | is_fresh($head)))) as $fresh
     | if ($fresh | length) > 0 then pass($fresh[0].why)
       elif ($all | length) > 0 then
