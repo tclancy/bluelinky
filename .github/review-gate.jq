@@ -197,8 +197,8 @@ def candidates($bots; $reviewers):
     # all. Worse for the gate's actual threat model, GitHub permits one fleet
     # bot to approve another's PR, so `metaframework-dispatch-bot[bot]`
     # approving a `dispatch-bot[bot]` PR satisfied it too. Both are the
-    # one-command self-service bypass this file rejects `chore:` titles for,
-    # three paragraphs below, while leaving the back door open.
+    # one-command self-service bypass this file rejects `chore:` titles for in
+    # `exempt_reason` above, while leaving the back door open.
     #
     # Note which side of the sibling arm had the bug. The COMMENT arm has
     # filtered on `is_bot($bots)` since the first draft; the two arms read as

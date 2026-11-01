@@ -117,8 +117,32 @@ function botComment(body: string, updatedAt: string | null = AFTER_HEAD, login =
   return { user: { login }, created_at: updatedAt, updated_at: updatedAt, body };
 }
 
-function review(state: string, submittedAt: string | null = AFTER_HEAD, login = REVIEWER_HUMAN) {
-  return { user: { login }, state, submitted_at: submittedAt };
+/**
+ * `author_association` is here because every REAL review object carries it, and
+ * omitting it made the allow-list guard read stronger than it was. Found in
+ * review: adding `or (.author_association != null)` to the formal arm -- the
+ * exact widening someone would write to accept "any OWNER/MEMBER/COLLABORATOR"
+ * -- left all 89 tests green, while a production-shaped `NONE` payload went
+ * straight back to the original false green. A fixture that omits a field
+ * cannot contest a rule that reads it.
+ */
+function review(
+  state: string,
+  submittedAt: string | null = AFTER_HEAD,
+  login = REVIEWER_HUMAN,
+  authorAssociation = 'OWNER'
+) {
+  return {
+    user: { login },
+    state,
+    submitted_at: submittedAt,
+    author_association: authorAssociation,
+  };
+}
+
+/** A review from an account with no relationship to the repo. */
+function strangerReview(state: string, login = 'random-passerby') {
+  return review(state, AFTER_HEAD, login, 'NONE');
 }
 
 /**
@@ -259,31 +283,36 @@ describe('review-gate.jq — when a review exists for this head', () => {
  * a review on an open PR, and `CHANGES_REQUESTED` needs no write access, so
  * before this fix the gate could be cleared by a stranger who read nothing —
  * and, worse for the gate's actual threat model, by one fleet bot approving
- * another fleet bot's PR, which GitHub permits.
+ * another fleet bot's PR, which GitHub permits. All 27 PRs this repo has ever
+ * had are `metaframework-dispatch-bot[bot]`, so the cross-bot case is a
+ * property of the fleet rather than something observed here yet.
  *
- * Every pre-existing formal-review test used `tclancy` as the login (that was
- * the helper's default), which is exactly why three all-killed mutation rounds
- * and 56 green tests never saw it. The fixtures were the defect, again.
+ * Every pre-existing formal-review test that named a plausible reviewer used
+ * `tclancy` -- the helper's default -- which is why three all-killed mutation
+ * rounds and 71 green tests never saw this. The two truncation tests did pass
+ * a different login, but a 300-character one, so they were grading length
+ * rather than identity. The fixtures were the defect, again.
  */
 describe('review-gate.jq — a formal review only counts from an allow-listed login', () => {
   it('rejects CHANGES_REQUESTED from an account nobody allow-listed', () => {
-    const v = decide({ reviews: [review('CHANGES_REQUESTED', AFTER_HEAD, 'random-passerby')] });
+    const v = decide({ reviews: [strangerReview('CHANGES_REQUESTED')] });
     expect(v.state).toBe('failure');
   });
 
   it('rejects APPROVED from an account nobody allow-listed', () => {
-    const v = decide({ reviews: [review('APPROVED', AFTER_HEAD, 'random-passerby')] });
+    const v = decide({ reviews: [strangerReview('APPROVED')] });
     expect(v.state).toBe('failure');
   });
 
   /**
    * The case the gate exists for. GitHub lets one App approve another App's
-   * PR, and this fleet runs two bots that open PRs in this repo.
+   * PR, and this fleet runs two PR-opening bots -- only one of which has
+   * opened a PR in this repo so far.
    */
   it("rejects one fleet bot approving another fleet bot's PR", () => {
     const v = decide({
       author: 'dispatch-bot[bot]',
-      reviews: [review('APPROVED', AFTER_HEAD, 'metaframework-dispatch-bot[bot]')],
+      reviews: [strangerReview('APPROVED', 'metaframework-dispatch-bot[bot]')],
     });
     expect(v.state).toBe('failure');
   });
@@ -307,12 +336,12 @@ describe('review-gate.jq — a formal review only counts from an allow-listed lo
    * guards the sharing as much as the rule.
    */
   it('rejects a login that is merely a PREFIX of the allow-listed reviewer', () => {
-    const v = decide({ reviews: [review('APPROVED', AFTER_HEAD, 'tclan')] });
+    const v = decide({ reviews: [strangerReview('APPROVED', 'tclan')] });
     expect(v.state).toBe('failure');
   });
 
   it('rejects a login that merely CONTAINS the allow-listed reviewer', () => {
-    const v = decide({ reviews: [review('APPROVED', AFTER_HEAD, 'nottclancyatall')] });
+    const v = decide({ reviews: [strangerReview('APPROVED', 'nottclancyatall')] });
     expect(v.state).toBe('failure');
   });
 
@@ -324,7 +353,7 @@ describe('review-gate.jq — a formal review only counts from an allow-listed lo
    * reviews.
    */
   it('does not let the review BOT satisfy the formal-review arm', () => {
-    const v = decide({ reviews: [review('APPROVED', AFTER_HEAD, REVIEW_BOT)] });
+    const v = decide({ reviews: [review('APPROVED', AFTER_HEAD, REVIEW_BOT, 'NONE')] });
     expect(v.state).toBe('failure');
   });
 
@@ -700,9 +729,10 @@ describe('review-gate.jq — the published description', () => {
    * arm became allow-listed, this fixture stopped PRODUCING the long
    * description at all -- the gate refused the review and returned the short
    * "No code review for this head" instead. `never exceeds 140` then passed
-   * vacuously, which is the second time this pair has failed to fail. The
-   * control above is what keeps that visible: it grades the string the gate is
-   * supposed to be truncating.
+   * vacuously -- the refusal is 106 characters -- while its sibling `truncates
+   * with an ellipsis` went RED. Only one of the pair failed to fail, which is
+   * the pair's redundancy doing its job. The reachability assertion below is
+   * what keeps that visible rather than re-derived.
    */
   const LONG_LOGIN_ALLOWED = { reviewer_logins: [LONG_LOGIN] };
 
@@ -758,6 +788,18 @@ function parse(text: string, key: string): string[] {
 
 describe('require-review.yml — the status half', () => {
   const text = withoutComments(REQUIRE);
+
+  /**
+   * The guard step's `if:`, and the slice of the file from it onward.
+   *
+   * Sliced rather than asserted file-wide because every line the guard step
+   * adds is a SECOND spelling of a line the main step already has -- the status
+   * context, the POST, the SHA lookup. A file-wide `toContain` is satisfied by
+   * the first copy and says nothing about the second, which is how four
+   * mutants on this step survived a green suite.
+   */
+  const GUARD_IF = /^\s*if: failure\(\) && steps\.fork\.outputs\.fork != 'true'$/m;
+  const guard = text.slice(text.search(GUARD_IF));
 
   it('publishes to the agreed status context', () => {
     expect(text).toContain(`context="${STATUS_CONTEXT}"`);
@@ -820,7 +862,9 @@ describe('require-review.yml — the status half', () => {
    * it upstream of `exempt_reason` in `review-gate.jq`. Dependabot runs read a
    * separate secret store, so `secrets.CLAUDE_CODE_OAUTH_TOKEN` interpolates
    * EMPTY on a Dependabot event even once the Actions secret exists — and this
-   * repo's open PRs are mostly Dependabot's. Every one of them would have
+   * repo has had no Dependabot PR yet -- `dependabot.yml` only landed in #50 --
+   * so these are the PRs it is about to start getting rather than ones it has.
+   * Every one of them would have
    * published `pending`, instructing Tom to add a secret that is already
    * there, instead of the `success` its exemption grants it.
    *
@@ -888,14 +932,96 @@ describe('require-review.yml — the status half', () => {
    * see it.
    */
   it('publishes an error status when a step BEFORE the gate dies', () => {
-    expect(text).toMatch(/^\s*if: failure\(\)$/m);
-    const guard = text.slice(text.search(/^\s*if: failure\(\)$/m));
+    expect(text).toMatch(GUARD_IF);
     expect(guard).toMatch(/state=error/);
     // It must re-resolve the SHA itself: `steps.pr.outputs.sha` is empty
     // precisely when the resolve step is what broke, so reading it would post
     // to nowhere and the guard would be decorative.
     expect(guard).not.toContain('steps.pr.outputs');
     expect(guard).toMatch(/gh api "repos\/\$\{REPO\}\/pulls\/\$\{number\}" --jq \.head\.sha/);
+  });
+
+  /**
+   * THE CONTEXT, COUNTED. Mutating ONLY the guard step's context to
+   * `dispatch/require-review-oops` left all 89 tests green, because the
+   * file-level `toContain(context=...)` above is satisfied by the `publish`
+   * helper's copy alone. In production that mutant publishes a brand-new red
+   * context beside a stale `dispatch/require-review` that still reads green --
+   * the precise failure mode the guard step was added to prevent. Found in
+   * review, not by the mutation round, which never mutated this line.
+   */
+  it('the guard step publishes to the SAME status context, not a new one', () => {
+    const occurrences = text.match(/context="dispatch\/require-review"/g) ?? [];
+    expect(occurrences).toHaveLength(2);
+    expect(guard).toContain(`context="${STATUS_CONTEXT}"`);
+  });
+
+  /**
+   * THE EVENT BRANCHES, AS ADJACENCY. Swapping `number="$ISSUE_NUMBER"` and
+   * `number="$PR_NUMBER"` between the two branches also survived 89 green
+   * tests: on an `issue_comment` event the swap reads the empty `PR_NUMBER`,
+   * the lookup fails into `|| true`, and the step exits 0 having published
+   * nothing -- a silent stale verdict on the one trigger this step exists for.
+   * Same treatment the fork branches get above, for the same reason.
+   */
+  it('resolves the PR number per event, and the branches are not invertible silently', () => {
+    expect(guard).toMatch(
+      /if \[ "\$EVENT_NAME" = "issue_comment" \]; then\s*\n\s*number="\$ISSUE_NUMBER"\s*\n\s*else\s*\n\s*number="\$PR_NUMBER"/
+    );
+  });
+
+  /**
+   * `|| true` on the POST. The job is already red, so this is lower stakes than
+   * the two above -- but without it a 403 on a cross-repo PR turns the guard
+   * step itself into the thing that fails, and `set -uo pipefail` carries no
+   * `-e`, so the intent is explicit rather than incidental.
+   */
+  it('never lets the guard step itself become the failure', () => {
+    expect(guard).toMatch(/-f target_url="\$\{RUN_URL\}" >\/dev\/null \|\| true/);
+  });
+
+  /**
+   * The guard obeys the same cross-repo rule the rest of the file states: a
+   * fork PR's token is read-only, so its POST would 403. `!= 'true'` and not
+   * `== 'false'` on purpose -- if the resolve step died before the fork step
+   * ran, the output is EMPTY, and publishing on an unknown fork state is the
+   * safe direction. A stale green is worse than a 403 `|| true` swallows.
+   */
+  it('the guard step skips cross-repository PRs, and defaults to publishing', () => {
+    expect(text).toMatch(/if: failure\(\) && steps\.fork\.outputs\.fork != 'true'/);
+    expect(text).not.toMatch(/if: failure\(\) && steps\.fork\.outputs\.fork == 'false'/);
+  });
+
+  /**
+   * `publish pending` must STOP. Dropping its `exit 0` survived 89 green tests,
+   * and control then falls through to `publish "$state" "$description"`, which
+   * overwrites the pending with the non-success verdict -- reinstating exactly
+   * the unactionable red X the Layer-0 branch exists to avoid.
+   */
+  it('stops after publishing pending rather than falling through', () => {
+    expect(text).toMatch(/publish pending \\\s*\n\s*"[^"]+"\s*\n\s*exit 0\s*\n\s*fi/);
+  });
+
+  /**
+   * GitHub truncates a commit-status description at 140 characters and 422s
+   * past it, which here would trip the ERR trap and publish `error` over a real
+   * verdict. `truncate140` in the jq file only covers the strings IT builds;
+   * every literal in this workflow is hand-written and unbounded. The longest
+   * today is 136 characters -- four of headroom on the one a future editor is
+   * most likely to lengthen.
+   */
+  it("every hand-written status description fits GitHub's 140-character cap", () => {
+    const literals = [
+      ...[...text.matchAll(/publish \w+ \\?\s*\n?\s*"([^"]{20,})"/g)].map(m => m[1]),
+      ...[...text.matchAll(/-f description="([^"$]{20,})"/g)].map(m => m[1]),
+    ];
+    // Reachability control: there are four such literals (the pending text, the
+    // trap's, and the guard step's), so a reader that found none would pass
+    // this vacuously.
+    expect(literals.length).toBeGreaterThanOrEqual(3);
+    for (const literal of literals) {
+      expect(literal.length).toBeLessThanOrEqual(140);
+    }
   });
 
   /**

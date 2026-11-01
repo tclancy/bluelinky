@@ -315,7 +315,7 @@ jobs:
       # cannot be recovered at all there is nowhere to post, and saying so in
       # the log is all that is left.
       - name: A failure anywhere above must not leave a stale verdict standing
-        if: failure()
+        if: failure() && steps.fork.outputs.fork != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -342,5 +342,5 @@ jobs:
           gh api -X POST "repos/${REPO}/statuses/${sha}" \
             -f state=error \
             -f context="dispatch/require-review" \
-            -f description="Gate failed before it could evaluate - see the run log. Not a review verdict." \
+            -f description="The gate run failed - see the run log. This is a gate failure, not a review verdict." \
             -f target_url="${RUN_URL}" >/dev/null || true
