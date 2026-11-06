@@ -190,6 +190,9 @@ jobs:
           # but him -- exactly the workload transfer option (a) was chosen to
           # avoid. `pending` instead: visibly not-green, not a false pass, and
           # it names the owner and the remedy.
+          #
+          # THIS CHECK NOW SITS AFTER THE GATE RATHER THAN BEFORE IT. See the
+          # note at its new site below -- the order is a bug fix, not tidying.
           REVIEWER_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
           set -euo pipefail
@@ -202,12 +205,6 @@ jobs:
               -f target_url="${RUN_URL}" >/dev/null
             printf 'dispatch/require-review = %s: %s\n' "$1" "$2"
           }
-
-          if [ -z "${REVIEWER_TOKEN}" ]; then
-            publish pending \
-              "Not provisioned: add the CLAUDE_CODE_OAUTH_TOKEN repo secret to enable the reviewer, then re-gate this PR."
-            exit 0
-          fi
 
           # Publish `error` rather than nothing if anything below blows up.
           # Without this the step just dies under `set -e` and NO status is
@@ -250,9 +247,100 @@ jobs:
                # reads fresh here, this line is why.
                head_committed_at: $head[0].commit.committer.date,
                bot_logins: ["claude[bot]"],
+               # The FORMAL-REVIEW arm is allow-listed separately, and the two
+               # lists answer different questions -- see the long note on
+               # `candidates` in `.github/review-gate.jq`. This repo is public,
+               # so without this any GitHub account could turn the status
+               # green by submitting a review, and one fleet bot could clear a
+               # PR opened by another.
+               #
+               # NOTE FOR THE NEXT EDITOR OF THIS COMMENT: these lines sit
+               # INSIDE the single-quoted jq program below, so an APOSTROPHE
+               # here closes that quote and leaves the rest of the step as one
+               # unterminated string -- a workflow that YAML parses and bash
+               # cannot. The draft of this very comment used a possessive and
+               # broke the block; the `every workflow run: block is valid
+               # shell` test caught it, which is what that test is for.
+               reviewer_logins: ["tclancy"],
                comments: $comments[0],
                reviews: $reviews[0] }' > gate-input.json
 
           verdict="$(jq -f .github/review-gate.jq gate-input.json)"
-          publish "$(printf '%s' "$verdict" | jq -r .state)" \
-                  "$(printf '%s' "$verdict" | jq -r .description)"
+          state="$(printf '%s' "$verdict" | jq -r .state)"
+          description="$(printf '%s' "$verdict" | jq -r .description)"
+
+          # THE UNPROVISIONED CHECK RUNS *AFTER* THE GATE, AND THE ORDER IS THE
+          # WHOLE POINT. It used to be the first thing in this step, which meant
+          # an empty `CLAUDE_CODE_OAUTH_TOKEN` short-circuited before
+          # `exempt_reason` in `review-gate.jq` was ever evaluated.
+          #
+          # That is not hypothetical, and it bites hardest once Tom adds the
+          # secret. **Dependabot runs read a SEPARATE secret store** (Settings
+          # -> Secrets and variables -> Dependabot), so
+          # `secrets.CLAUDE_CODE_OAUTH_TOKEN` interpolates EMPTY on a Dependabot
+          # `pull_request` event even when the Actions secret exists. Under the
+          # old order every Dependabot PR in this repo would publish `pending`
+          # with a description instructing Tom to add a secret that is already
+          # there -- instead of the `success` that `exempt_reason` grants it.
+          # Found in the bot review of parsons-remote#26 and fixed in both
+          # copies. GENERAL RULE: an exemption must never sit downstream of a
+          # provisioning check.
+          #
+          # Ordering it this way also keeps ONE source of truth for the
+          # exemption. The obvious alternative -- test the author in shell,
+          # before the token check -- puts `dependabot[bot]` in both this file
+          # and `review-gate.jq`, which is the drift the
+          # `the author exemptions agree between the two files` test exists to
+          # prevent.
+          if [ "$state" != "success" ] && [ -z "${REVIEWER_TOKEN}" ]; then
+            publish pending \
+              "Not provisioned for this event: no CLAUDE_CODE_OAUTH_TOKEN visible, so the reviewer cannot run. Dependabot uses a separate secret store."
+            exit 0
+          fi
+
+          publish "$state" "$description"
+
+      # The ERR trap above only covers the step it is declared in. If
+      # `Resolve PR number and head SHA` or `Is this a cross-repository PR?`
+      # dies first -- a transient 5xx or a secondary rate limit on `gh api` is
+      # enough -- then nothing publishes, and the PR silently keeps whatever
+      # `dispatch/require-review` it already had. On a re-evaluation of an
+      # approved-then-pushed PR that is a stale GREEN: the exact failure mode
+      # the trap exists to prevent, arriving one step earlier than the trap can
+      # see it.
+      #
+      # `if: failure()` so it runs only when something above failed, and it
+      # re-resolves the SHA itself rather than trusting `steps.pr.outputs` --
+      # which is empty precisely when the resolve step is what broke. If the SHA
+      # cannot be recovered at all there is nowhere to post, and saying so in
+      # the log is all that is left.
+      - name: A failure anywhere above must not leave a stale verdict standing
+        if: failure() && steps.fork.outputs.fork != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -uo pipefail
+          if [ "$EVENT_NAME" = "issue_comment" ]; then
+            number="$ISSUE_NUMBER"
+          else
+            number="$PR_NUMBER"
+            sha="$PR_HEAD_SHA"
+          fi
+          if [ -z "${sha:-}" ]; then
+            sha="$(gh api "repos/${REPO}/pulls/${number}" --jq .head.sha || true)"
+          fi
+          if [ -z "${sha:-}" ]; then
+            echo "::warning::Could not resolve a head SHA, so no status could be published."
+            exit 0
+          fi
+          gh api -X POST "repos/${REPO}/statuses/${sha}" \
+            -f state=error \
+            -f context="dispatch/require-review" \
+            -f description="The gate run failed - see the run log. This is a gate failure, not a review verdict." \
+            -f target_url="${RUN_URL}" >/dev/null || true
